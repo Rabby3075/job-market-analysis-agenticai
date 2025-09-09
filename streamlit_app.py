@@ -77,7 +77,24 @@ def main():
     """Main application function"""
     
     # Header
-    st.markdown('<h1 class="main-header">🔍 Job Market Analysis Agentic AI</h1>', unsafe_allow_html=True)
+    st.markdown('<h1 class="main-header">🔍 Job Market Analysis</h1>', unsafe_allow_html=True)
+
+    # Bootstrap datasets from backend on first load or after refresh
+    try:
+        ds = requests.get("http://localhost:8000/datasets", timeout=10)
+        if ds.status_code == 200:
+            names = ds.json().get("datasets", [])
+            if not names:
+                # ask backend to restore from disk if empty
+                r = requests.post("http://localhost:8000/restore-datasets", timeout=20)
+                if r.status_code == 200:
+                    names = r.json().get("datasets", [])
+            # ensure session state reflects backend
+            st.session_state.datasets = {name: {"name": name} for name in names}
+            if names and not st.session_state.get('current_dataset'):
+                st.session_state.current_dataset = names[0]
+    except Exception:
+        pass
     
     # Sidebar
     with st.sidebar:
@@ -98,6 +115,22 @@ def main():
                 st.error("Please enter a URL")
         
         st.divider()
+        
+        # ABS Releases
+        st.subheader("ABS Releases")
+        col_latest, col_custom = st.columns([1, 1])
+        with col_latest:
+            if st.button("⬇️ Download Latest", use_container_width=True):
+                abs_download_and_process("latest")
+        with col_custom:
+            months = [
+                "January","February","March","April","May","June",
+                "July","August","September","October","November","December"
+            ]
+            m = st.selectbox("Month", months, index=4)
+            y = st.number_input("Year", min_value=2000, max_value=2100, value=int(datetime.now().year), step=1)
+            if st.button("⬇️ Download Month", use_container_width=True):
+                abs_download_and_process(f"{m} {int(y)}")
         
         # File Upload
         st.subheader("Upload Dataset")
@@ -143,6 +176,8 @@ def main():
             if selected_dataset != st.session_state.current_dataset:
                 st.session_state.current_dataset = selected_dataset
                 st.rerun()
+        
+
     
     # Main content area
     if not st.session_state.datasets or len(st.session_state.datasets) == 0:
@@ -215,6 +250,13 @@ def analyze_url(url):
                     if isinstance(st.session_state.datasets, list):
                         st.session_state.datasets = {name: {"name": name} for name in st.session_state.datasets}
                     
+                    # Check if we need to force reload a specific dataset
+                    current_dataset = st.session_state.get('current_dataset')
+                    if current_dataset and st.session_state.get(f'force_reload_{current_dataset}', False):
+                        # Clear the force reload flag
+                        st.session_state[f'force_reload_{current_dataset}'] = False
+                        # The dataset will be reloaded automatically
+                    
                     # Show results
                     st.json(data)
                     st.rerun()
@@ -229,6 +271,46 @@ def analyze_url(url):
             st.error("❌ Cannot connect to backend. Please ensure the FastAPI server is running.")
         except Exception as e:
             st.error(f"❌ Error: {str(e)}")
+
+def abs_download_and_process(query: str):
+    """Call backend to download an ABS release by query then process files and refresh UI."""
+    with st.spinner(f"⬇️ Downloading ABS release: {query}..."):
+        try:
+            r = requests.post("http://localhost:8000/abs/download", json={"query": query}, timeout=60)
+            if r.status_code != 200:
+                st.error(f"Download failed: {r.text}")
+                return
+            download_info = r.json()
+            paths = download_info.get("downloaded", [])
+            if not paths:
+                st.warning("No files downloaded.")
+                return
+            st.success(f"Downloaded {len(paths)} files. Processing...")
+        except Exception as e:
+            st.error(f"Download error: {e}")
+            return
+    with st.spinner("📊 Processing downloaded files..."):
+        try:
+            pr = requests.post("http://localhost:8000/process-files", json={"paths": paths}, timeout=120)
+            if pr.status_code != 200:
+                st.error(f"Processing failed: {pr.text}")
+                return
+            pdata = pr.json()
+            # Refresh datasets list from backend for safety
+            ds = requests.get("http://localhost:8000/datasets", timeout=15)
+            if ds.status_code == 200:
+                ds_json = ds.json()
+                names = ds_json.get("datasets", [])
+                # Ensure dict form
+                st.session_state.datasets = {name: {"name": name} for name in names}
+                # Set current dataset to first processed one
+                processed = pdata.get("processed", [])
+                if processed:
+                    st.session_state.current_dataset = processed[0].get("dataset_name")
+            st.success("ABS release processed. Refreshing view...")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Processing error: {e}")
 
 def process_uploaded_file(uploaded_file):
     """Process an uploaded dataset file"""
@@ -369,70 +451,72 @@ def show_dataset_analysis():
         with tab4:
             show_sector_analysis(analysis)
     
-    # Data Preview
-    st.subheader("📋 Data Preview")
-    
-    # Check if dataset has multiple sheets
-    try:
-        # Try different name variations to find the correct one
-        possible_names = [
-            dataset_name,  # Original name
-            dataset_name.replace(' ', '_'),  # Replace spaces with underscores
-            dataset_name.replace('[', '[').replace(']', ']'),  # Keep brackets
-            dataset_name.replace(' ', ''),  # Remove all spaces
-        ]
-        
-        sheets_info = None
-        working_name = None
-        
-        for name_variant in possible_names:
-            try:
-                # Properly encode the dataset name for the URL
-                import urllib.parse
-                encoded_name = urllib.parse.quote(name_variant, safe='')
-                
-                sheets_response = requests.get(f"http://localhost:8000/sheets/{encoded_name}")
-                
-                if sheets_response.status_code == 200:
-                    sheets_info = sheets_response.json()
-                    working_name = name_variant
-                    break
+    # Data Preview + Visualizations tabs
+    tab_preview, tab_viz = st.tabs(["📋 Data Preview", "📊 Visualizations"])
+    with tab_preview:
+        # Check if dataset has multiple sheets
+        try:
+            # Try different name variations to find the correct one
+            possible_names = [
+                dataset_name,  # Original name
+                dataset_name.replace(' ', '_'),  # Replace spaces with underscores
+                dataset_name.replace('[', '[').replace(']', ']'),  # Keep brackets
+                dataset_name.replace(' ', ''),  # Remove all spaces
+            ]
+            
+            sheets_info = None
+            working_name = None
+            
+            for name_variant in possible_names:
+                try:
+                    # Properly encode the dataset name for the URL
+                    import urllib.parse
+                    encoded_name = urllib.parse.quote(name_variant, safe='')
                     
-            except Exception as e:
-                continue
-        
-        if sheets_info:
-            if sheets_info.get('has_multiple_sheets', False):
-                # Create tabs for multiple sheets
-                sheet_names = sheets_info.get('sheet_names', [])
-                
-                if len(sheet_names) > 1:
-                    tabs = st.tabs(sheet_names)
+                    sheets_response = requests.get(f"http://localhost:8000/sheets/{encoded_name}")
                     
-                    for i, (tab, sheet_name) in enumerate(zip(tabs, sheet_names)):
-                        with tab:
-                            st.write(f"**Sheet: {sheet_name}**")
-                            sheet_data = sheets_info.get('sheets', {}).get(sheet_name, {})
-                            
-                            if 'sample_data' in sheet_data and sheet_data['sample_data']:
-                                df_sample = pd.DataFrame(sheet_data['sample_data'])
-                                st.write(f"**Shape:** {sheet_data.get('shape', 'Unknown')}")
-                                st.write(f"**Columns:** {len(sheet_data.get('columns', []))}")
-                                st.dataframe(df_sample, use_container_width=True)
-                            else:
-                                st.info(f"No sample data available for sheet '{sheet_name}'")
+                    if sheets_response.status_code == 200:
+                        sheets_info = sheets_response.json()
+                        working_name = name_variant
+                        break
+                        
+                except Exception:
+                    continue
+            
+            if sheets_info:
+                if sheets_info.get('has_multiple_sheets', False):
+                    # Create tabs for multiple sheets
+                    sheet_names = sheets_info.get('sheet_names', [])
+                    
+                    if len(sheet_names) > 1:
+                        tabs = st.tabs(sheet_names)
+                        
+                        for i, (tab, sheet_name) in enumerate(zip(tabs, sheet_names)):
+                            with tab:
+                                st.write(f"**Sheet: {sheet_name}**")
+                                sheet_data = sheets_info.get('sheets', {}).get(sheet_name, {})
+                                
+                                if 'sample_data' in sheet_data and sheet_data['sample_data']:
+                                    df_sample = pd.DataFrame(sheet_data['sample_data'])
+                                    st.write(f"**Shape:** {sheet_data.get('shape', 'Unknown')}")
+                                    st.write(f"**Columns:** {len(sheet_data.get('columns', []))}")
+                                    st.dataframe(df_sample, use_container_width=True)
+                                else:
+                                    st.info(f"No sample data available for sheet '{sheet_name}'")
+                    else:
+                        # Single sheet
+                        show_single_sheet_preview(working_name or dataset_name)
                 else:
-                    # Single sheet
+                    # Single sheet dataset
                     show_single_sheet_preview(working_name or dataset_name)
             else:
-                # Single sheet dataset
-                show_single_sheet_preview(working_name or dataset_name)
-        else:
-            st.error("❌ Could not find dataset in backend")
-    except Exception as e:
-        st.error(f"❌ Error loading sheet data: {str(e)}")
-        # Fallback to single sheet preview
-        show_single_sheet_preview(dataset_name)
+                st.error("❌ Could not find dataset in backend")
+        except Exception as e:
+            st.error(f"❌ Error loading sheet data: {str(e)}")
+            # Fallback to single sheet preview
+            show_single_sheet_preview(dataset_name)
+    with tab_viz:
+        show_visualizations(dataset_name)
 
 def show_trends_analysis(analysis):
     """Display trends analysis"""
@@ -551,6 +635,29 @@ def show_single_sheet_preview(dataset_name):
             st.info("Sample data not available")
     except:
         st.info("Sample data not available")
+
+def show_visualizations(dataset_name: str):
+    """Fetch and render Plotly visualizations from backend for the dataset."""
+    try:
+        import urllib.parse
+        encoded_name = urllib.parse.quote(dataset_name, safe='')
+        r = requests.get(f"http://localhost:8000/visualizations/{encoded_name}")
+        if r.status_code != 200:
+            st.info("Visualizations not available yet.")
+            return
+        charts = r.json() or {}
+        if not charts:
+            st.info("No charts available.")
+            return
+        for title, fig_dict in charts.items():
+            try:
+                fig = go.Figure(fig_dict)
+                st.plotly_chart(fig, use_container_width=True)
+            except Exception:
+                # Fallback: raw JSON if rendering fails
+                st.json({title: fig_dict})
+    except Exception as e:
+        st.info(f"Could not load visualizations: {e}")
 
 if __name__ == "__main__":
     main()

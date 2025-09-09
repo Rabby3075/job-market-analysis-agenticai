@@ -22,6 +22,141 @@ class DataProcessorAgent:
         self.processed_data = {}
         self.data_summary = {}
         self.multi_sheet_data = {}  # Store multiple sheets separately
+        # ABS recipe output directory
+        self._abs_outdir = Path("data/preprocessed")
+        self._abs_outdir.mkdir(parents=True, exist_ok=True)
+    
+    # ---------------- ABS-specific helpers (integrated) ----------------
+    def _abs_read_data1(self, path: str) -> pd.DataFrame:
+        df = pd.read_excel(path, sheet_name="Data1", header=0)
+        # Notebook logic skips first 9 metadata rows
+        df = df.iloc[9:].reset_index(drop=True)
+        df = df.rename(columns={df.columns[0]: "Date"})
+        df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+        return df.loc[:, ~df.columns.duplicated()].copy()
+
+    def _abs_num(self, df: pd.DataFrame) -> pd.DataFrame:
+        for c in df.columns:
+            if c != "Date":
+                df[c] = pd.to_numeric(df[c], errors="coerce")
+        return df
+
+    def _abs_clean_industry(self, name: str) -> str:
+        s = str(name).strip()
+        if s.startswith("Standard Error of Job Vacancies"):
+            m = re.search(r"Standard Error of Job Vacancies\s*;\s*(.*?)\s*;", s)
+            return f"SE_{(m.group(1) if m else s)}"
+        if s.startswith("Job Vacancies"):
+            m = re.search(r"Job Vacancies\s*;\s*(.*?)\s*;", s)
+            return (m.group(1) if m else s)
+        return s
+
+    def _abs_clean_sector(self, name: str, tag: str) -> str:
+        s = str(name).strip()
+        if s.startswith("Standard Error of Job Vacancies"):
+            m = re.search(r"Standard Error of Job Vacancies\s*;\s*(?:Private|Public)?\s*;?\s*(.*?)\s*;", s)
+            return f"SE_{(m.group(1) if m else s)}_{tag}"
+        if s.startswith("Job Vacancies"):
+            if "Seasonally Adjusted" in s:
+                return f"Australia_{tag}_Seasonal"
+            if "Trend" in s:
+                return f"Australia_{tag}_Trend"
+            m = re.search(r"Job Vacancies\s*;\s*(?:Private|Public)?\s*;?\s*(.*?)\s*;", s)
+            return f"{(m.group(1) if m else s)}_{tag}"
+        return s
+
+    def _abs_split(self, v: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
+        se_cols = [c for c in v.columns if str(c).startswith("SE_")]
+        vac = v[["Date"] + [c for c in v.columns if c not in se_cols]].copy()
+        se = pd.concat([v[["Date"]], v[se_cols]], axis=1)
+        return vac, se
+
+    def _abs_melt(self, vac: pd.DataFrame, idname: str) -> pd.DataFrame:
+        return vac.melt(id_vars="Date", var_name=idname, value_name="Vacancies_thousands")
+
+    def _abs_detect_table_type(self, path: str) -> str:
+        try:
+            ix = pd.read_excel(path, sheet_name="Index", header=None)
+            txt = " ".join(map(str, ix.fillna("").astype(str).head(8).values.ravel())).lower()
+            if "private sector" in txt:
+                return "private"
+            if "public sector" in txt:
+                return "public"
+            if "industry" in txt:
+                return "industry"
+        except Exception:
+            pass
+        return "total"
+
+    def _abs_save(self, prefix: str, vac: pd.DataFrame, se: pd.DataFrame, long: pd.DataFrame):
+        vac_path = self._abs_outdir / f"{prefix}_vacancies_clean.csv"
+        se_path = self._abs_outdir / f"{prefix}_standard_error.csv"
+        long_path = self._abs_outdir / f"{prefix}_vacancies_clean_long.csv"
+        try:
+            vac.to_csv(str(vac_path), index=False)
+            logger.info(f"ABS save: {vac_path}")
+        except Exception as e:
+            logger.warning(f"ABS save FAILED for {vac_path}: {e}")
+        try:
+            se.to_csv(str(se_path), index=False)
+            logger.info(f"ABS save: {se_path}")
+        except Exception as e:
+            logger.warning(f"ABS save FAILED for {se_path}: {e}")
+        try:
+            long.to_csv(str(long_path), index=False)
+            logger.info(f"ABS save: {long_path}")
+        except Exception as e:
+            logger.warning(f"ABS save FAILED for {long_path}: {e}")
+
+    def _abs_proc_industry(self, path: str, interpolate: bool = False) -> pd.DataFrame:
+        df = self._abs_read_data1(path).rename(columns=lambda c: self._abs_clean_industry(c))
+        df = df.loc[:, ~df.columns.duplicated()]
+        # Drop Series ID / Unit columns to mirror notebook filtering
+        for drop_col in ("Series ID", "Unit"):
+            if drop_col in df.columns:
+                df = df.drop(columns=[drop_col])
+        if interpolate:
+            df = df.set_index("Date").interpolate("time").reset_index()
+        df = self._abs_num(df)
+        vac, se = self._abs_split(df)
+        long = self._abs_melt(vac, "Industry")
+        self._abs_save("industry", vac, se, long)
+        # alias used in notebooks
+        alias_path = self._abs_outdir / "job_vacancies_clean.csv"
+        try:
+            vac.to_csv(str(alias_path), index=False)
+            logger.info(f"ABS save (alias): {alias_path}")
+        except Exception as e:
+            logger.warning(f"ABS save FAILED (alias) for {alias_path}: {e}")
+        return vac
+
+    def _abs_proc_sector(self, path: str, tag: str, interpolate: bool = False) -> pd.DataFrame:
+        df = self._abs_read_data1(path).rename(columns=lambda c: self._abs_clean_sector(c, tag))
+        df = df.loc[:, ~df.columns.duplicated()]
+        for drop_col in ("Series ID", "Unit"):
+            if drop_col in df.columns:
+                df = df.drop(columns=[drop_col])
+        df = df[df["Date"] >= "1983-11-01"].reset_index(drop=True)
+        if interpolate:
+            nums = df.drop(columns=["Date"]).apply(pd.to_numeric, errors="coerce").interpolate("linear")
+            df[nums.columns] = nums
+        df = self._abs_num(df)
+        vac, se = self._abs_split(df)
+        long = self._abs_melt(vac, "Region")
+        self._abs_save(tag.lower(), vac, se, long)
+        return vac
+
+    def _abs_preprocess_workbook(self, path: str, interpolate: bool = False) -> str:
+        kind = self._abs_detect_table_type(path)
+        if kind == "industry":
+            self._abs_proc_industry(path, interpolate=interpolate)
+        elif kind == "private":
+            self._abs_proc_sector(path, "Private", interpolate=interpolate)
+        elif kind == "public":
+            self._abs_proc_sector(path, "Public", interpolate=interpolate)
+        else:
+            self._abs_proc_sector(path, "Total", interpolate=interpolate)
+        return kind
         
     def process_dataset(self, file_path: str) -> Tuple[pd.DataFrame, Dict]:
         """
@@ -59,9 +194,13 @@ class DataProcessorAgent:
                 'missing_values': df.isnull().sum().to_dict()
             }
             
-            # Clean and preprocess
-            df_cleaned = self._clean_data(df)
-            df_processed = self._preprocess_data(df_cleaned)
+            # Clean and preprocess with safe fallback for ABS pipelines
+            try:
+                df_cleaned = self._clean_data(df)
+                df_processed = self._preprocess_data(df_cleaned)
+            except Exception as e:
+                logger.error(f"Safe fallback: skipping generic cleaning due to error: {e}")
+                df_processed = df
             
             # Generate summary
             summary = self._generate_summary(df_processed, original_info)
@@ -128,7 +267,11 @@ class DataProcessorAgent:
                         processed_sheets = {}
                         for sheet_name, sheet_df in all_sheets.items():
                             try:
-                                processed_sheet = self._clean_data(sheet_df)
+                                # Prefer tailored cleaning for ABS 'Data1' sheet where applicable
+                                if sheet_name.strip().lower() == 'data1':
+                                    processed_sheet = self._process_abs_data1_sheet(sheet_df, str(file_path))
+                                else:
+                                    processed_sheet = self._clean_data(sheet_df)
                                 processed_sheets[sheet_name] = processed_sheet
                                 logger.info(f"Processed sheet '{sheet_name}': {processed_sheet.shape}")
                             except Exception as e:
@@ -138,10 +281,20 @@ class DataProcessorAgent:
                         # Store processed sheets
                         self.multi_sheet_data[dataset_name_from_path] = processed_sheets
                         
-                        # Return the first sheet as main data (for backward compatibility)
-                        first_sheet_name = list(processed_sheets.keys())[0]
-                        logger.info(f"Loaded and processed {len(processed_sheets)} sheets separately, returning first sheet: {first_sheet_name}")
-                        return processed_sheets[first_sheet_name], {'sheets': list(processed_sheets.keys())}
+                        # Return 'Data1' as the primary sheet if present, otherwise the first sheet
+                        preferred_sheet_name = None
+                        for candidate in ['Data1', 'data1', 'DATA1']:
+                            if candidate in processed_sheets:
+                                preferred_sheet_name = candidate
+                                break
+                        if preferred_sheet_name is None:
+                            preferred_sheet_name = list(processed_sheets.keys())[0]
+                        logger.info(
+                            f"Loaded and processed {len(processed_sheets)} sheets separately, returning primary sheet: {preferred_sheet_name}"
+                        )
+                        # ABS recipes are already applied inside Data1 processing above.
+                        # Skip a second pass here to avoid double-processing.
+                        return processed_sheets[preferred_sheet_name], {'sheets': list(processed_sheets.keys())}
                     else:
                         logger.error("No valid sheets found in Excel file")
                         return None, {}
@@ -152,6 +305,8 @@ class DataProcessorAgent:
                     # Store as single sheet for consistency
                     dataset_name_from_path = Path(file_path).stem
                     self.multi_sheet_data[dataset_name_from_path] = {'Sheet1': df}
+                    # Single-sheet files: skip ABS recipe here; Data1-specific logic
+                    # will be applied when needed in the processing stage.
                     return df, {}
                     
             elif file_path.suffix.lower() == '.json':
@@ -189,6 +344,150 @@ class DataProcessorAgent:
         df_clean = df_clean.drop_duplicates()
         
         return df_clean
+
+    def _process_abs_data1_sheet(self, df: pd.DataFrame, source_path: Optional[str] = None) -> pd.DataFrame:
+        """Specialized cleaner for ABS 'Data1' sheets.
+
+        Rules:
+        - Keep existing column headers (first row already contains long names).
+        - Drop metadata rows like 'Unit', 'Series Type', 'Data Type', etc.
+        - Keep only rows from the first parsable date onward in the first column.
+        - Parse first column to datetime; coerce all other columns to numeric.
+        - Remove empty/placeholder columns that contain no meaningful data.
+        """
+        # Try to follow exact ABS recipe if source workbook path is known
+        if source_path is not None:
+            try:
+                kind = self._abs_detect_table_type(source_path)
+                base = self._abs_read_data1(source_path)
+                if kind == 'industry':
+                    base = base.rename(columns=lambda c: self._abs_clean_industry(c))
+                elif kind == 'private':
+                    base = base.rename(columns=lambda c: self._abs_clean_sector(c, 'Private'))
+                elif kind == 'public':
+                    base = base.rename(columns=lambda c: self._abs_clean_sector(c, 'Public'))
+                else:
+                    base = base.rename(columns=lambda c: self._abs_clean_sector(c, 'Total'))
+                base = base.loc[:, ~base.columns.duplicated()]
+                for drop_col in ("Series ID", "Unit"):
+                    if drop_col in base.columns:
+                        base = base.drop(columns=[drop_col])
+                if kind in {'private','public','total'}:
+                    base = base[base["Date"] >= "1983-11-01"].reset_index(drop=True)
+                base = self._abs_num(base)
+                vac, _ = self._abs_split(base)
+                return vac
+            except Exception:
+                pass
+        working_df = df.copy()
+
+        # Drop fully empty rows/cols first
+        working_df = working_df.dropna(how='all').dropna(axis=1, how='all')
+
+        if working_df.shape[1] == 0:
+            return working_df
+
+        first_col_name = working_df.columns[0]
+
+        # Drop well-known ABS metadata rows in the first column
+        metadata_labels = {
+            'unit', 'series type', 'data type', 'frequency', 'collection month',
+            'series start', 'series end', 'no. obs', 'no. obs.', 'series id'
+        }
+        mask_meta = working_df[first_col_name].astype(str).str.strip().str.lower().isin(metadata_labels)
+        working_df = working_df[~mask_meta]
+
+        # Keep only rows from the first date onward
+        date_series = pd.to_datetime(working_df[first_col_name], errors='coerce', dayfirst=True)
+        if date_series.notna().any():
+            first_date_idx = date_series.first_valid_index()
+            if first_date_idx is not None:
+                working_df = working_df.loc[first_date_idx:]
+                date_series = pd.to_datetime(working_df[first_col_name], errors='coerce', dayfirst=True)
+
+        # Assign parsed dates back
+        working_df[first_col_name] = date_series
+
+        # Clean column names
+        working_df.columns = [self._clean_column_name(c) for c in working_df.columns]
+
+        # Convert remaining columns to numeric where possible
+        for col in working_df.columns[1:]:
+            working_df[col] = pd.to_numeric(working_df[col], errors='coerce')
+
+        # Remove empty columns BEFORE handling missing values
+        # This is crucial for ABS data where many columns are completely empty
+        working_df = self._remove_empty_columns_abs(working_df)
+
+        # Standard cleaning pipeline
+        working_df = self._handle_missing_values(working_df)
+        working_df = self._preprocess_data(working_df)
+
+        return working_df
+    
+    def _remove_empty_columns_abs(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Remove empty/placeholder columns from ABS Data1 sheets.
+        
+        This method is specifically designed for ABS job vacancy data where
+        many columns contain placeholder data that should be removed.
+        
+        Based on the user's observation that columns B-I and M-R are empty
+        in the Excel files, this method identifies and removes such columns.
+        
+        Args:
+            df: DataFrame to clean
+            
+        Returns:
+            DataFrame with empty/placeholder columns removed
+        """
+        if df.empty or df.shape[1] <= 1:
+            return df
+            
+        columns_to_remove = []
+        
+        for col in df.columns:
+            # Skip the first column (usually dates/IDs)
+            if col == df.columns[0]:
+                continue
+                
+            col_data = df[col]
+            
+            # Check if column is completely empty (all NaN)
+            if col_data.isna().all():
+                columns_to_remove.append(col)
+                logger.info(f"Removing completely empty column: {col}")
+                continue
+            
+            # Check if column has very few non-null values (< 5% of total rows)
+            non_null_count = col_data.notna().sum()
+            total_rows = len(col_data)
+            non_null_ratio = non_null_count / total_rows if total_rows > 0 else 0
+            
+            if non_null_ratio < 0.05:  # Less than 5% non-null values
+                columns_to_remove.append(col)
+                logger.info(f"Removing nearly empty column: {col} ({non_null_count}/{total_rows} non-null values, {non_null_ratio:.1%} ratio)")
+                continue
+            
+            # For ABS job vacancy data, check for columns with very low variation
+            # that might be placeholder data filled during processing
+            non_null_data = col_data.dropna()
+            if len(non_null_data) > 20:  # Only check if we have enough data
+                unique_values = non_null_data.nunique()
+                unique_ratio = unique_values / len(non_null_data)
+                
+                # Check for columns with very low variation (likely placeholder data)
+                if unique_ratio < 0.15:  # Less than 15% unique values
+                    columns_to_remove.append(col)
+                    logger.info(f"Removing low-variation ABS column: {col} ({unique_values}/{len(non_null_data)} unique values, {unique_ratio:.1%} ratio)")
+                    continue
+        
+        # Remove identified columns
+        if columns_to_remove:
+            df_cleaned = df.drop(columns=columns_to_remove)
+            logger.info(f"Removed {len(columns_to_remove)} empty/placeholder columns from ABS data: {columns_to_remove}")
+            return df_cleaned
+        
+        return df
     
     def _clean_column_name(self, col_name: str) -> str:
         """Clean column names for consistency"""
@@ -296,28 +595,7 @@ class DataProcessorAgent:
             if df_processed[col].dtype == 'object':
                 df_processed[col] = df_processed[col].astype(str).str.strip()
         
-        # Handle outliers in numeric columns
-        numeric_columns = df_processed.select_dtypes(include=[np.number]).columns
-        for col in numeric_columns:
-            df_processed[col] = self._handle_outliers(df_processed[col])
-        
         return df_processed
-    
-    def _handle_outliers(self, series: pd.Series) -> pd.Series:
-        """Handle outliers using IQR method"""
-        Q1 = series.quantile(0.25)
-        Q3 = series.quantile(0.75)
-        IQR = Q3 - Q1
-        
-        lower_bound = Q1 - 1.5 * IQR
-        upper_bound = Q3 + 1.5 * IQR
-        
-        # Cap outliers instead of removing them
-        series_clean = series.copy()
-        series_clean[series_clean < lower_bound] = lower_bound
-        series_clean[series_clean > upper_bound] = upper_bound
-        
-        return series_clean
     
     def _generate_summary(self, df: pd.DataFrame, original_info: Dict) -> Dict:
         """Generate comprehensive data summary"""
@@ -429,8 +707,14 @@ class DataProcessorAgent:
                     clean_sheet_name = "".join(c for c in sheet_name if c.isalnum() or c in (' ', '-', '_')).rstrip()
                     clean_sheet_name = clean_sheet_name.replace(' ', '_')
                     
-                    # Save individual sheet as CSV
+                    # Save individual sheet as CSV (ensure dates are ISO strings to avoid #### in Excel)
                     sheet_csv_path = os.path.join(multi_sheet_dir, f"{clean_sheet_name}.csv")
+                    try:
+                        for col in sheet_df.columns:
+                            if np.issubdtype(sheet_df[col].dtype, np.datetime64):
+                                sheet_df[col] = pd.to_datetime(sheet_df[col], errors='coerce').dt.strftime('%Y-%m-%d')
+                    except Exception:
+                        pass
                     sheet_df.to_csv(sheet_csv_path, index=False)
                     logger.info(f"Saved sheet '{sheet_name}' to: {sheet_csv_path}")
                     

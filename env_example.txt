@@ -1,0 +1,12 @@
+# Server Configuration
+HOST=0.0.0.0
+PORT=8000
+STREAMLIT_PORT=8501
+
+# Data Processing Configuration
+MAX_FILE_SIZE=104857600  # 100MB
+LOG_LEVEL=INFO
+
+# Feature Flags
+ENABLE_AUTO_ANALYSIS=true
+ENABLE_VISUALIZATION=true

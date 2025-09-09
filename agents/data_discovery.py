@@ -23,7 +23,21 @@ class DataDiscoveryAgent:
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         })
+        # Month name map for ABS release resolution
+        self._month_name_to_num = {
+            'january': 1, 'february': 2, 'march': 3, 'april': 4,
+            'may': 5, 'june': 6, 'july': 7, 'august': 8,
+            'september': 9, 'october': 10, 'november': 11, 'december': 12
+        }
         
+        # Map ABS table numbers to friendly names
+        self._abs_table_map = {
+            '1': 'StatesTerritories',
+            '2': 'PrivateSector',
+            '3': 'PublicSector',
+            '4': 'Industry',
+        }
+
     def discover_datasets(self, url: str) -> List[Dict]:
         """
         Discover available datasets from a given URL
@@ -88,6 +102,116 @@ class DataDiscoveryAgent:
             logger.error(f"Error discovering datasets from {url}: {str(e)}")
             return []
     
+    # ------------------- ABS Release Resolution -------------------
+    def parse_release_query(self, query: str) -> Dict[str, Optional[int]]:
+        """Parse user query like 'latest', 'May 2025', 'feb 2024' into month/year.
+        Returns { 'latest': bool, 'month': int|None, 'year': int|None }
+        """
+        if not query:
+            return {'latest': True, 'month': None, 'year': None}
+        q = query.strip().lower()
+        if q in { 'latest', 'new', 'most recent', 'recent' }:
+            return {'latest': True, 'month': None, 'year': None}
+        # Try to match month year patterns
+        # e.g. 'may 2025', 'february 2024', 'feb 24'
+        month_regex = r"(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december)"
+        m = re.search(rf"\b{month_regex}\b\s+(\d{{2,4}})", q)
+        if m:
+            month_token = m.group(1)
+            year_token = m.group(2)
+            month_full = {
+                'jan':'january','feb':'february','mar':'march','apr':'april','jun':'june','jul':'july',
+                'aug':'august','sep':'september','sept':'september','oct':'october','nov':'november','dec':'december'
+            }.get(month_token, month_token)
+            month_num = self._month_name_to_num.get(month_full, None)
+            year_val = int(year_token)
+            if year_val < 100:
+                year_val += 2000 if year_val < 50 else 1900
+            return {'latest': False, 'month': month_num, 'year': year_val}
+        # Only month given (assume current/any year will be resolved by closest match)
+        m2 = re.search(rf"\b{month_regex}\b", q)
+        if m2:
+            month_token = m2.group(1)
+            month_full = {
+                'jan':'january','feb':'february','mar':'march','apr':'april','jun':'june','jul':'july',
+                'aug':'august','sep':'september','sept':'september','oct':'october','nov':'november','dec':'december'
+            }.get(month_token, month_token)
+            month_num = self._month_name_to_num.get(month_full, None)
+            return {'latest': False, 'month': month_num, 'year': None}
+        return {'latest': True, 'month': None, 'year': None}
+
+    def resolve_abs_release_links(self, abs_root_url: str) -> List[Dict[str, str]]:
+        """Scrape the ABS Job Vacancies page and return list of release links with
+        normalized { 'title': ..., 'url': ..., 'month': int, 'year': int }.
+        """
+        try:
+            resp = self.session.get(abs_root_url)
+            resp.raise_for_status()
+            soup = BeautifulSoup(resp.content, 'html.parser')
+            releases = []
+            month_names = list(self._month_name_to_num.keys())
+            # Collect anchor tags that look like release links
+            for a in soup.find_all('a', href=True):
+                text = a.get_text(strip=True)
+                txt_lower = text.lower()
+                # Look for patterns like 'Job Vacancies, Australia, May 2025'
+                if 'job vacancies' in txt_lower:
+                    for mname in month_names:
+                        if mname in txt_lower:
+                            mnum = self._month_name_to_num[mname]
+                            # find year in text
+                            y = None
+                            ym = re.search(r"(19|20)\d{2}", txt_lower)
+                            if ym:
+                                y = int(ym.group(0))
+                            if y:
+                                url = urljoin(abs_root_url, a['href'])
+                                releases.append({'title': text, 'url': url, 'month': mnum, 'year': y})
+                                break
+            # Deduplicate by month-year keeping latest occurrence
+            unique = {}
+            for r in releases:
+                key = (r['year'], r['month'])
+                unique[key] = r
+            return list(unique.values())
+        except Exception as e:
+            logger.error(f"Error resolving ABS releases: {str(e)}")
+            return []
+
+    def download_abs_release(self, abs_root_url: str, query: str, output_dir: str = 'data/raw') -> List[str]:
+        """Given an ABS Job Vacancies root page and a query like 'latest' or 'May 2025',
+        find the matching release page, discover dataset files on that page, and download them (raw only).
+        Returns list of downloaded file paths.
+        """
+        intent = self.parse_release_query(query)
+        releases = self.resolve_abs_release_links(abs_root_url)
+        if not releases:
+            return []
+        target = None
+        if intent['latest']:
+            target = max(releases, key=lambda r: (r['year'], r['month']))
+        else:
+            # exact match if year provided, else closest by month (latest year)
+            candidates = [r for r in releases if r['month'] == intent['month'] and (intent['year'] is None or r['year'] == intent['year'])]
+            if not candidates and intent['month'] is not None:
+                candidates = [r for r in releases if r['month'] == intent['month']]
+            if candidates:
+                target = max(candidates, key=lambda r: (r['year'], r['month']))
+        if not target:
+            target = max(releases, key=lambda r: (r['year'], r['month']))
+        logger.info(f"Resolved ABS release '{query}' -> {target['title']} ({target['url']})")
+        # Discover datasets from the release page and download them
+        datasets = self.discover_datasets(target['url'])
+        downloaded: List[str] = []
+        for ds in datasets[:4]:
+            try:
+                path = self.download_dataset(ds, output_dir)
+                if path:
+                    downloaded.append(path)
+            except Exception as e:
+                logger.warning(f"Failed to download {ds.get('name')}: {e}")
+        return downloaded
+
     def _extract_dataset_info(self, link, base_url: str) -> Optional[Dict]:
         """Extract metadata from a download link"""
         try:
@@ -219,6 +343,16 @@ class DataDiscoveryAgent:
                     logger.warning(f"Could not check Excel sheets: {str(e)}")
             
             logger.info(f"Downloaded dataset to: {filepath}")
+
+            # If this looks like an ABS Excel workbook, rename with canonical pattern
+            if file_type in ['xlsx', 'xls']:
+                try:
+                    new_path = self._maybe_rename_abs_workbook(filepath)
+                    if new_path and new_path != filepath:
+                        filepath = new_path
+                        logger.info(f"Renamed ABS workbook to: {filepath}")
+                except Exception as e:
+                    logger.info(f"ABS rename skipped: {e}")
             return filepath
             
         except Exception as e:
@@ -320,3 +454,51 @@ class DataDiscoveryAgent:
         except Exception as e:
             logger.error(f"Error extracting HTML table: {str(e)}")
             return None
+
+    # ---------------- File renaming helpers ----------------
+    def _maybe_rename_abs_workbook(self, filepath: str) -> Optional[str]:
+        """If the Excel workbook is an ABS Job Vacancies file, rename to
+        ABS_Table{n}_{Kind}_{YYYY-MM}.xlsx pattern in the same directory.
+        """
+        try:
+            from pathlib import Path
+
+            import pandas as pd
+            p = Path(filepath)
+            x = pd.ExcelFile(filepath)
+            if 'Index' not in x.sheet_names:
+                return filepath
+            ix = pd.read_excel(filepath, sheet_name='Index', header=None)
+            header_text = " ".join(map(str, ix.fillna("").astype(str).head(8).values.ravel()))
+            lower = header_text.lower()
+            if 'job vacancies' not in lower:
+                return filepath
+            # Extract table number
+            m = re.search(r"table\s*(\d)", lower)
+            table_no = m.group(1) if m else '1'
+            kind = self._abs_table_map.get(table_no, 'StatesTerritories')
+            # Extract latest month-year shown in header block (Series End)
+            # Fallback: use current year-month
+            ym = re.search(r"(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\s+(19|20)\d{2}", lower)
+            if ym:
+                month_token = ym.group(1)
+                month_full = {
+                    'jan':'01','feb':'02','mar':'03','apr':'04','may':'05','jun':'06','jul':'07',
+                    'aug':'08','sep':'09','sept':'09','oct':'10','nov':'11','dec':'12'
+                }[month_token]
+                year = re.search(r"(19|20)\d{2}", lower).group(0)
+                yyyymm = f"{year}-{month_full}"
+            else:
+                from datetime import datetime
+                yyyymm = datetime.now().strftime("%Y-%m")
+            new_name = f"ABS_Table{table_no}_{kind}_{yyyymm}{p.suffix}"
+            new_path = p.with_name(new_name)
+            if new_path != p:
+                try:
+                    os.replace(str(p), str(new_path))
+                    return str(new_path)
+                except Exception:
+                    return str(p)
+            return str(p)
+        except Exception:
+            return filepath
