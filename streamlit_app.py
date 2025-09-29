@@ -3,16 +3,19 @@ Streamlit Frontend for Job Market Analysis
 Provides an interactive interface for the agentic AI system
 """
 
+import glob
 import io
 import json
 import os
+import warnings
 from datetime import datetime
 
 import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
 import requests
 import streamlit as st
+from streamlit.components.v1 import html as st_html
+
+from agents.data_visualizer import DataVisualizer
 
 # Page configuration
 st.set_page_config(
@@ -21,6 +24,10 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# Silence noisy FutureWarnings from plotly/pandas datetime conversions
+warnings.filterwarnings("ignore", category=FutureWarning, module="_plotly_utils.basevalidators")
+warnings.filterwarnings("ignore", message=".*DatetimeProperties.to_pydatetime is deprecated.*")
 
 # Custom CSS
 st.markdown("""
@@ -76,6 +83,68 @@ if not isinstance(st.session_state.datasets, dict):
 def main():
     """Main application function"""
     
+    # Navigation
+    st.markdown("""
+    <style>
+    .nav-container {
+        display: flex;
+        justify-content: center;
+        margin-bottom: 2rem;
+    }
+    .nav-button {
+        background-color: #f0f2f6;
+        border: 2px solid #1f77b4;
+        color: #1f77b4;
+        padding: 10px 20px;
+        margin: 0 10px;
+        border-radius: 8px;
+        text-decoration: none;
+        font-weight: bold;
+        transition: all 0.3s;
+    }
+    .nav-button:hover {
+        background-color: #1f77b4;
+        color: white;
+    }
+    .nav-button.active {
+        background-color: #1f77b4;
+        color: white;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    # Navigation buttons
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.markdown('<div class="nav-container">', unsafe_allow_html=True)
+        
+        # Check current page
+        if 'current_page' not in st.session_state:
+            st.session_state.current_page = 'analysis'
+        
+        # Analysis page button
+        if st.button("📊 Data Analysis", key="nav_analysis", 
+                    type="primary" if st.session_state.current_page == 'analysis' else "secondary"):
+            st.session_state.current_page = 'analysis'
+            st.rerun()
+        
+        # Visualization page button  
+        if st.button("📈 Visualizations", key="nav_viz",
+                    type="primary" if st.session_state.current_page == 'visualizations' else "secondary"):
+            st.session_state.current_page = 'visualizations'
+            st.rerun()
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Route to appropriate page
+    if st.session_state.current_page == 'analysis':
+        show_analysis_page()
+    elif st.session_state.current_page == 'visualizations':
+        show_visualizations_page()
+
+def show_analysis_page():
+    """Show the main data analysis page"""
+    
     # Header
     st.markdown('<h1 class="main-header">🔍 Job Market Analysis</h1>', unsafe_allow_html=True)
 
@@ -120,7 +189,7 @@ def main():
         st.subheader("ABS Releases")
         col_latest, col_custom = st.columns([1, 1])
         with col_latest:
-            if st.button("⬇️ Download Latest", use_container_width=True):
+            if st.button("⬇️ Download Latest"):
                 abs_download_and_process("latest")
         with col_custom:
             months = [
@@ -129,7 +198,7 @@ def main():
             ]
             m = st.selectbox("Month", months, index=4)
             y = st.number_input("Year", min_value=2000, max_value=2100, value=int(datetime.now().year), step=1)
-            if st.button("⬇️ Download Month", use_container_width=True):
+            if st.button("⬇️ Download Month"):
                 abs_download_and_process(f"{m} {int(y)}")
         
         # File Upload
@@ -189,7 +258,110 @@ def main():
     st.divider()
     st.markdown(
         "---\n"
-        "**Job Market Analysis Agentic AI** | Built with Streamlit, FastAPI, and AI Agents"
+        "**Job Market Analysis Agentic AI**"
+    )
+
+def show_visualizations_page():
+    """Show the visualizations page"""
+    
+    # Header
+    st.markdown('<h1 class="main-header">📈 Visualizations</h1>', unsafe_allow_html=True)
+    
+
+    # Discover preprocessed industry CSVs (Data1.csv inside dataset _sheets folder)
+    pre_csvs = []
+    try:
+        for root, dirs, files in os.walk(os.path.join("data", "preprocessed")):
+            for f in files:
+                if f.lower() == "data1.csv":
+                    pre_csvs.append(os.path.join(root, f))
+    except Exception:
+        pass
+
+    viz = DataVisualizer()
+
+    if not pre_csvs:
+        st.info("No preprocessed industry CSVs found yet. Download/process an ABS dataset first.")
+    else:
+        # Filter to industry-only CSVs and create a tab per dataset
+        try:
+            pre_csvs = sorted(pre_csvs, key=lambda p: os.path.getmtime(p), reverse=True)
+        except Exception:
+            pre_csvs = sorted(pre_csvs)
+
+        known_inds = {"Mining","Manufacturing","Construction","Retail Trade","Accommodation and Food Services",
+                      "Administrative and Support Services","Education and Training",
+                      "Electricity, Gas, Water and Waste Services","Health Care and Social Assistance"}
+        industry_csvs = []
+        for p in pre_csvs:
+            try:
+                head = pd.read_csv(p, nrows=1)
+                cols = set(map(str, head.columns))
+                if ("Date" in cols) and (len(cols & known_inds) >= 3):
+                    industry_csvs.append(p)
+            except Exception:
+                continue
+        if not industry_csvs:
+            st.info("No industry-formatted datasets detected yet.")
+            return
+
+        labels = [os.path.basename(os.path.dirname(p)) for p in industry_csvs]
+        tabs = st.tabs(labels)
+
+        for idx, (tab, csv_path) in enumerate(zip(tabs, industry_csvs)):
+            with tab:
+                col_base, col_roll = st.columns([1, 1])
+                with col_base:
+                    base_year = st.text_input("Index Base (YYYY-01-01)", value="2019-01-01", key=f"base-{idx}")
+                with col_roll:
+                    roll_win = st.number_input("Rolling Window (q)", min_value=2, max_value=16, value=4, step=1, key=f"roll-{idx}")
+
+                try:
+                    df = pd.read_csv(csv_path)
+                    long = viz.prepare_long_format(df)
+                    industries = sorted(long["Industry"].unique())
+                except Exception as e:
+                    long = pd.DataFrame(columns=["Date","Industry","Value","Year"])  # empty
+                    industries = []
+                    st.error(f"Failed to load dataset: {e}")
+
+                chosen = st.multiselect("Industries", industries, default=industries[:6], key=f"inds-{idx}")
+
+                st.subheader("Trends")
+                c1, c2, c3 = st.columns(3)
+                with c1:
+                    st.plotly_chart(viz.chart_multiline(long, chosen), width='stretch', key=f"pl-multi-{idx}")
+                with c2:
+                    st.plotly_chart(viz.chart_indexed(long, base=base_year, industries=chosen), width='stretch', key=f"pl-indexed-{idx}")
+                with c3:
+                    st.plotly_chart(viz.chart_rolling_mean(long, window=int(roll_win), industries=chosen), width='stretch', key=f"pl-roll-{idx}")
+
+                st.subheader("Rankings & Composition")
+                r1, r2 = st.columns(2)
+                with r1:
+                    st.plotly_chart(viz.chart_latest_bar(long), width='stretch', key=f"pl-bar-{idx}")
+                with r2:
+                    st.plotly_chart(viz.chart_latest_pie(long), width='stretch', key=f"pl-pie-{idx}")
+                st.plotly_chart(viz.chart_stacked_composition(long), width='stretch', key=f"pl-stack-{idx}")
+
+                st.subheader("Growth & Change")
+                g1, g2 = st.columns(2)
+                with g1:
+                    st.plotly_chart(viz.chart_yoy_heatmap(long), width='stretch', key=f"pl-yoy-{idx}")
+                with g2:
+                    st.plotly_chart(viz.chart_growth_vs_size_bubble(long), width='stretch', key=f"pl-bubble-{idx}")
+                st.plotly_chart(viz.chart_delta_between(long, start="2019-01-01"), width='stretch', key=f"pl-delta-{idx}")
+
+                st.subheader("COVID Impact")
+                st.plotly_chart(viz.chart_indexed(long, base=base_year, industries=chosen), width='stretch', key=f"pl-indexed-covid-{idx}")
+
+    st.divider()
+    
+    # Footer
+    st.divider()
+    st.markdown(
+        "---\n"
+        "**Job Market Analysis Agentic AI** "
     )
 
 def show_welcome_screen():
@@ -206,7 +378,6 @@ def show_welcome_screen():
         - **🔍 Discover** datasets from URLs
         - **📊 Preprocess** and clean data
         - **🧠 Analyze** job market trends
-        - **📈 Visualize** insights interactively
         
         ### Getting Started:
         
@@ -451,72 +622,69 @@ def show_dataset_analysis():
         with tab4:
             show_sector_analysis(analysis)
     
-    # Data Preview + Visualizations tabs
-    tab_preview, tab_viz = st.tabs(["📋 Data Preview", "📊 Visualizations"])
-    with tab_preview:
-        # Check if dataset has multiple sheets
-        try:
-            # Try different name variations to find the correct one
-            possible_names = [
-                dataset_name,  # Original name
-                dataset_name.replace(' ', '_'),  # Replace spaces with underscores
-                dataset_name.replace('[', '[').replace(']', ']'),  # Keep brackets
-                dataset_name.replace(' ', ''),  # Remove all spaces
-            ]
-            
-            sheets_info = None
-            working_name = None
-            
-            for name_variant in possible_names:
-                try:
-                    # Properly encode the dataset name for the URL
-                    import urllib.parse
-                    encoded_name = urllib.parse.quote(name_variant, safe='')
+    # Data Preview
+    st.subheader("📋 Data Preview")
+    # Check if dataset has multiple sheets
+    try:
+        # Try different name variations to find the correct one
+        possible_names = [
+            dataset_name,  # Original name
+            dataset_name.replace(' ', '_'),  # Replace spaces with underscores
+            dataset_name.replace('[', '[').replace(']', ']'),  # Keep brackets
+            dataset_name.replace(' ', ''),  # Remove all spaces
+        ]
+        
+        sheets_info = None
+        working_name = None
+        
+        for name_variant in possible_names:
+            try:
+                # Properly encode the dataset name for the URL
+                import urllib.parse
+                encoded_name = urllib.parse.quote(name_variant, safe='')
+                
+                sheets_response = requests.get(f"http://localhost:8000/sheets/{encoded_name}")
+                
+                if sheets_response.status_code == 200:
+                    sheets_info = sheets_response.json()
+                    working_name = name_variant
+                    break
                     
-                    sheets_response = requests.get(f"http://localhost:8000/sheets/{encoded_name}")
+            except Exception:
+                continue
+        
+        if sheets_info:
+            if sheets_info.get('has_multiple_sheets', False):
+                # Create tabs for multiple sheets
+                sheet_names = sheets_info.get('sheet_names', [])
+                
+                if len(sheet_names) > 1:
+                    tabs = st.tabs(sheet_names)
                     
-                    if sheets_response.status_code == 200:
-                        sheets_info = sheets_response.json()
-                        working_name = name_variant
-                        break
-                        
-                except Exception:
-                    continue
-            
-            if sheets_info:
-                if sheets_info.get('has_multiple_sheets', False):
-                    # Create tabs for multiple sheets
-                    sheet_names = sheets_info.get('sheet_names', [])
-                    
-                    if len(sheet_names) > 1:
-                        tabs = st.tabs(sheet_names)
-                        
-                        for i, (tab, sheet_name) in enumerate(zip(tabs, sheet_names)):
-                            with tab:
-                                st.write(f"**Sheet: {sheet_name}**")
-                                sheet_data = sheets_info.get('sheets', {}).get(sheet_name, {})
-                                
-                                if 'sample_data' in sheet_data and sheet_data['sample_data']:
-                                    df_sample = pd.DataFrame(sheet_data['sample_data'])
-                                    st.write(f"**Shape:** {sheet_data.get('shape', 'Unknown')}")
-                                    st.write(f"**Columns:** {len(sheet_data.get('columns', []))}")
-                                    st.dataframe(df_sample, use_container_width=True)
-                                else:
-                                    st.info(f"No sample data available for sheet '{sheet_name}'")
-                    else:
-                        # Single sheet
-                        show_single_sheet_preview(working_name or dataset_name)
+                    for i, (tab, sheet_name) in enumerate(zip(tabs, sheet_names)):
+                        with tab:
+                            st.write(f"**Sheet: {sheet_name}**")
+                            sheet_data = sheets_info.get('sheets', {}).get(sheet_name, {})
+                            
+                            if 'sample_data' in sheet_data and sheet_data['sample_data']:
+                                df_sample = pd.DataFrame(sheet_data['sample_data'])
+                                st.write(f"**Shape:** {sheet_data.get('shape', 'Unknown')}")
+                                st.write(f"**Columns:** {len(sheet_data.get('columns', []))}")
+                                st.dataframe(df_sample, width='stretch')
+                            else:
+                                st.info(f"No sample data available for sheet '{sheet_name}'")
                 else:
-                    # Single sheet dataset
+                    # Single sheet
                     show_single_sheet_preview(working_name or dataset_name)
             else:
-                st.error("❌ Could not find dataset in backend")
-        except Exception as e:
-            st.error(f"❌ Error loading sheet data: {str(e)}")
-            # Fallback to single sheet preview
-            show_single_sheet_preview(dataset_name)
-    with tab_viz:
-        show_visualizations(dataset_name)
+                # Single sheet dataset
+                show_single_sheet_preview(working_name or dataset_name)
+        else:
+            st.error("❌ Could not find dataset in backend")
+    except Exception as e:
+        st.error(f"❌ Error loading sheet data: {str(e)}")
+        # Fallback to single sheet preview
+        show_single_sheet_preview(dataset_name)
 
 def show_trends_analysis(analysis):
     """Display trends analysis"""
@@ -556,14 +724,9 @@ def show_geography_analysis(analysis):
             if 'top_locations' in data:
                 top_locations = data['top_locations']
                 
-                # Create bar chart
-                fig = px.bar(
-                    x=list(top_locations.keys()),
-                    y=list(top_locations.values()),
-                    title=f"Top Locations - {col}",
-                    labels={'x': 'Location', 'y': 'Count'}
-                )
-                st.plotly_chart(fig, use_container_width=True)
+                # Display as table
+                df_locations = pd.DataFrame(list(top_locations.items()), columns=['Location', 'Count'])
+                st.dataframe(df_locations, width='stretch')
     else:
         st.info("No geographic data available")
 
@@ -581,15 +744,9 @@ def show_industry_analysis(analysis):
                 names = data['names']
                 values = data['values']
                 
-                # Create horizontal bar chart
-                fig = px.bar(
-                    y=names,
-                    x=values,
-                    orientation='h',
-                    title=f"Top Industries - {col}",
-                    labels={'x': 'Count', 'y': 'Industry'}
-                )
-                st.plotly_chart(fig, use_container_width=True)
+                # Display as table
+                df_industries = pd.DataFrame({'Industry': names, 'Count': values})
+                st.dataframe(df_industries, width='stretch')
     else:
         st.info("No industry data available")
 
@@ -606,13 +763,9 @@ def show_sector_analysis(analysis):
             if 'sectors' in data:
                 sectors = data['sectors']
                 
-                # Create pie chart
-                fig = px.pie(
-                    values=list(sectors.values()),
-                    names=list(sectors.keys()),
-                    title=f"Sector Breakdown - {col}"
-                )
-                st.plotly_chart(fig, use_container_width=True)
+                # Display as table
+                df_sectors = pd.DataFrame(list(sectors.items()), columns=['Sector', 'Count'])
+                st.dataframe(df_sectors, width='stretch')
     else:
         st.info("No sector data available")
 
@@ -628,7 +781,7 @@ def show_single_sheet_preview(dataset_name):
             data_info = response.json()
             if 'sample_data' in data_info and data_info['sample_data']:
                 df_sample = pd.DataFrame(data_info['sample_data'])
-                st.dataframe(df_sample, use_container_width=True)
+                st.dataframe(df_sample, width='stretch')
             else:
                 st.info("Sample data not available")
         else:
@@ -636,28 +789,6 @@ def show_single_sheet_preview(dataset_name):
     except:
         st.info("Sample data not available")
 
-def show_visualizations(dataset_name: str):
-    """Fetch and render Plotly visualizations from backend for the dataset."""
-    try:
-        import urllib.parse
-        encoded_name = urllib.parse.quote(dataset_name, safe='')
-        r = requests.get(f"http://localhost:8000/visualizations/{encoded_name}")
-        if r.status_code != 200:
-            st.info("Visualizations not available yet.")
-            return
-        charts = r.json() or {}
-        if not charts:
-            st.info("No charts available.")
-            return
-        for title, fig_dict in charts.items():
-            try:
-                fig = go.Figure(fig_dict)
-                st.plotly_chart(fig, use_container_width=True)
-            except Exception:
-                # Fallback: raw JSON if rendering fails
-                st.json({title: fig_dict})
-    except Exception as e:
-        st.info(f"Could not load visualizations: {e}")
 
 if __name__ == "__main__":
     main()

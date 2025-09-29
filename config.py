@@ -10,7 +10,6 @@ BASE_DIR = Path(__file__).parent
 
 # Data directories
 DATA_DIR = BASE_DIR / "data"
-CHARTS_DIR = BASE_DIR / "charts"
 LOGS_DIR = BASE_DIR / "logs"
 
 STATIC_DIR = BASE_DIR / "static"
@@ -35,10 +34,6 @@ TREND_ANALYSIS_WINDOW = int(os.getenv("TREND_ANALYSIS_WINDOW", 10))
 OUTLIER_THRESHOLD = float(os.getenv("OUTLIER_THRESHOLD", 1.5))
 MIN_DATA_POINTS = int(os.getenv("MIN_DATA_POINTS", 5))
 
-# Visualization configuration
-CHART_HEIGHT = int(os.getenv("CHART_HEIGHT", 400))
-CHART_WIDTH = int(os.getenv("CHART_WIDTH", 800))
-CHART_TEMPLATE = os.getenv("CHART_TEMPLATE", "plotly_white")
 
 # Logging configuration
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
@@ -74,11 +69,10 @@ CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*").split(",")
 # Feature flags
 ENABLE_HTML_EXTRACTION = os.getenv("ENABLE_HTML_EXTRACTION", "true").lower() == "true"
 ENABLE_AUTO_ANALYSIS = os.getenv("ENABLE_AUTO_ANALYSIS", "true").lower() == "true"
-ENABLE_VISUALIZATION = os.getenv("ENABLE_VISUALIZATION", "true").lower() == "true"
 
 def create_directories():
     """Create necessary directories if they don't exist"""
-    for directory in [DATA_DIR, CHARTS_DIR, LOGS_DIR, STATIC_DIR]:
+    for directory in [DATA_DIR, LOGS_DIR, STATIC_DIR]:
         directory.mkdir(exist_ok=True)
 
 def get_config():
@@ -86,7 +80,6 @@ def get_config():
     return {
         'base_dir': str(BASE_DIR),
         'data_dir': str(DATA_DIR),
-        'charts_dir': str(CHARTS_DIR),
         'logs_dir': str(LOGS_DIR),
         'host': HOST,
         'port': PORT,
@@ -99,7 +92,6 @@ def get_config():
         'abs_url': ABS_JOB_VACANCIES_URL,
         'cache_enabled': CACHE_ENABLED,
         'enable_auto_analysis': ENABLE_AUTO_ANALYSIS,
-        'enable_visualization': ENABLE_VISUALIZATION
     }
 
 # Create directories on import

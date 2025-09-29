@@ -1,6 +1,6 @@
 # 🔍 Job Market Analysis Agentic AI Application
 
-An intelligent AI agent that automatically discovers, downloads, preprocesses, analyzes, and visualizes job market datasets from various sources. Built specifically for analyzing the [ABS Job Vacancies data](https://www.abs.gov.au/statistics/labour/jobs/job-vacancies-australia/may-2025) and other job market datasets.
+An intelligent AI agent that automatically discovers, downloads, preprocesses, and analyzes job market datasets from various sources. Built specifically for analyzing the [ABS Job Vacancies data](https://www.abs.gov.au/statistics/labour/jobs/job-vacancies-australia/may-2025) and other job market datasets.
 
 ## ✨ Features
 
@@ -8,7 +8,6 @@ An intelligent AI agent that automatically discovers, downloads, preprocesses, a
 - **📊 Multi-format Support**: Handles CSV, XLSX, XLS, JSON, and HTML tables
 - **🧹 Intelligent Preprocessing**: Automatically cleans, validates, and prepares data for analysis
 - **🧠 Advanced Analytics**: Provides comprehensive job market insights and trends
-- **📈 Interactive Visualizations**: Creates dynamic charts and graphs using Plotly
 - **🌐 Modern Web Interface**: Built with FastAPI and Streamlit
 - **🤖 Agentic AI**: Multiple specialized AI agents working together
 - **📊 Universal CSV Output**: All preprocessed data saved as CSV regardless of original format
@@ -61,7 +60,6 @@ streamlit run streamlit_app.py
    - Table 4: Job vacancies by industry across Australia
 3. **Downloads and preprocesses** the data automatically
 4. **Analyzes** key metrics, trends, and insights
-5. **Generates interactive visualizations** for each dataset
 
 ### For Other Datasets
 
@@ -80,13 +78,11 @@ job-vacancies-agent/
 │   ├── data_processor.py    # Data preprocessing pipeline
 │   └── analyzer.py          # Analysis and insights engine
 ├── 🛠️ utils/
-│   ├── visualizer.py        # Chart generation
 │   └── logger.py            # Professional logging system
 ├── 📁 data/                 # Downloaded datasets
 │   ├── raw/                 # Original datasets
 │   └── preprocessed/        # Clean, processed data (CSV)
 
-├── 📊 charts/               # Generated visualizations
 └── 📝 logs/                 # Professional log files
 ```
 
@@ -112,13 +108,6 @@ job-vacancies-agent/
 - Generates actionable recommendations
 - Analyzes geographic, industry, and sector distributions
 
-### 4. **Visualization Agent**
-
-- Creates interactive charts and dashboards
-- Generates trend analysis visualizations
-- Provides geographic and industry breakdowns
-- Exports charts in multiple formats
-
 ## 📊 Supported Data Sources
 
 - **Australian Bureau of Statistics (ABS)** - Primary focus
@@ -137,7 +126,6 @@ job-vacancies-agent/
 - `GET /datasets` - List all processed datasets
 - `GET /dataset/{name}` - Get specific dataset info
 - `GET /analysis/{name}` - Get analysis results
-- `GET /visualizations/{name}` - Get charts
 - `GET /health` - System health check
 
 ### Example API Usage
@@ -159,7 +147,6 @@ print(f"Discovered {data['datasets_discovered']} datasets")
 ### 1. **Streamlit Interface** (Recommended)
 
 - Interactive data exploration
-- Real-time visualizations
 - User-friendly controls
 - Access at: http://localhost:8501
 
@@ -284,7 +271,6 @@ logs/
 ├── data_discovery_all.log    # Data discovery agent logs
 ├── data_processor_all.log    # Data processing agent logs
 ├── analyzer_all.log          # Analysis agent logs
-└── visualizer_all.log        # Visualization agent logs
 ```
 
 ### **Log Levels**
@@ -338,4 +324,3 @@ MIT License - see LICENSE file for details
 
 - Australian Bureau of Statistics for providing comprehensive job market data
 - FastAPI and Streamlit communities for excellent frameworks
-- Plotly for powerful visualization capabilities

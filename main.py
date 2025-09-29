@@ -19,7 +19,7 @@ from agents.analyzer import JobMarketAnalyzer
 # Import our AI agents
 from agents.data_discovery import DataDiscoveryAgent
 from agents.data_processor import DataProcessorAgent
-from agents.visualizer_agent import JobMarketVisualizer
+from agents.data_visualizer import DataVisualizer
 from utils.json_helper import clean_analysis_results, convert_to_serializable
 from utils.logger import get_logger
 
@@ -38,12 +38,11 @@ discovery_agent = DataDiscoveryAgent()
 processor_agent = DataProcessorAgent()
 
 analyzer_agent = JobMarketAnalyzer()
-visualizer_agent = JobMarketVisualizer()
+visualizer = DataVisualizer()
 
 # Global storage for processed data and results
 processed_datasets = {}
 analysis_results = {}
-visualization_charts = {}
 
 # Mount static files (if directory exists)
 if os.path.exists("static"):
@@ -73,12 +72,6 @@ def restore_from_disk() -> int:
                 # Build analysis and charts if missing
                 if dataset_name not in analysis_results:
                     analysis_results[dataset_name] = analyzer_agent.analyze_job_market_data(df, dataset_name)
-                # Build visualizations
-                try:
-                    figs = visualizer_agent.create_dashboard(df, analysis_results.get(dataset_name, {}))
-                    visualization_charts[dataset_name] = {k: json.loads(v.to_json()) for k, v in figs.items()}
-                except Exception as e:
-                    logger.warning(f"Visualization build failed for {dataset_name}: {e}")
                 count += 1
             except Exception as e:
                 logger.error(f"Failed to restore {csv_path}: {e}")
@@ -90,15 +83,12 @@ def restore_from_disk() -> int:
             processed_datasets[dataset_name] = df
             if dataset_name not in analysis_results:
                 analysis_results[dataset_name] = analyzer_agent.analyze_job_market_data(df, dataset_name)
-            try:
-                figs = visualizer_agent.create_dashboard(df, analysis_results.get(dataset_name, {}))
-                visualization_charts[dataset_name] = {k: json.loads(v.to_json()) for k, v in figs.items()}
-            except Exception as e:
-                logger.warning(f"Visualization build failed for {dataset_name}: {e}")
             count += 1
         except Exception as e:
             logger.error(f"Failed to restore {csv_path}: {e}")
     return count
+
+# Removed saved-charts endpoint per requirements
 
 @app.get("/", response_class=HTMLResponse)
 async def root():
@@ -176,7 +166,7 @@ async def health_check():
             "discovery": "active",
             "processor": "active", 
             "analyzer": "active",
-            "visualizer": "active"
+            "visualizer": "active",
         },
         "datasets_processed": len(processed_datasets),
         "analyses_completed": len(analysis_results)
@@ -229,13 +219,8 @@ async def analyze_url(url_data: Dict[str, str]):
                         analysis = analyzer_agent.analyze_job_market_data(df, dataset_name)
                         if analysis:
                             analysis_results[dataset_name] = analysis
+                            # Visualization saving removed; Streamlit renders interactively from memory
                             
-                            # Create visualizations using Visualization Agent
-                            try:
-                                figs = visualizer_agent.create_dashboard(df, analysis)
-                                visualization_charts[dataset['name']] = {k: json.loads(v.to_json()) for k, v in figs.items()}
-                            except Exception as e:
-                                logger.warning(f"Visualization build failed during /analyze-url for {dataset['name']}: {e}")
                 
             except Exception as e:
                 logger.error(f"Error processing dataset {dataset['name']}: {str(e)}")
@@ -246,11 +231,9 @@ async def analyze_url(url_data: Dict[str, str]):
             # Clean the name to match what the frontend expects
             clean_name = name.replace('_', ' ').replace('[', '[').replace(']', ']')
             processed_datasets[clean_name] = df
-            # Also re-key analysis and visualizations to the cleaned name for consistent access
+            # Also re-key analysis to the cleaned name for consistent access
             if name in analysis_results:
                 analysis_results[clean_name] = analysis_results.pop(name)
-            if name in visualization_charts:
-                visualization_charts[clean_name] = visualization_charts.pop(name)
         
         # Clean analysis results for JSON serialization
         sample_analysis = None
@@ -407,12 +390,7 @@ async def process_files(payload: Dict[str, List[str]]):
             processed_datasets[clean_name] = df
             analysis = analyzer_agent.analyze_job_market_data(df, clean_name)
             analysis_results[clean_name] = analysis or {}
-            # Build visualizations
-            try:
-                figs = visualizer_agent.create_dashboard(df, analysis)
-                visualization_charts[clean_name] = {k: json.loads(v.to_json()) for k, v in figs.items()}
-            except Exception as e:
-                logger.warning(f"Visualization build failed for {clean_name}: {e}")
+            # Visualization saving removed; Streamlit renders interactively
             processed.append({
                 "dataset_name": clean_name,
                 "shape": list(df.shape),
@@ -580,43 +558,6 @@ async def get_sheets(dataset_name: str):
         logger.error(f"Error getting sheets for {dataset_name}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error retrieving sheets: {str(e)}")
 
-@app.get("/visualizations/{dataset_name}")
-async def get_visualizations(dataset_name: str, mode: str = "auto"):
-    """Get visualizations for a specific dataset"""
-    # Tolerant lookup by several name variants
-    candidates = [
-        dataset_name,
-        dataset_name.replace(' ', '_'),
-        dataset_name.replace('_', ' '),
-        dataset_name.replace(' ', ''),
-    ]
-    charts = None
-    for key in visualization_charts.keys():
-        if key in candidates or key.replace('_', ' ') in candidates:
-            charts = visualization_charts[key]
-            break
-    if charts is None or not charts:
-        # Try to build on the fly from processed dataset if available
-        df = processed_datasets.get(dataset_name)
-        if df is None:
-            # try alternative keys
-            for key in processed_datasets.keys():
-                if key in candidates or key.replace('_', ' ') in candidates:
-                    df = processed_datasets[key]
-                    break
-        if df is None:
-            raise HTTPException(status_code=404, detail="Visualizations not available for this dataset")
-        try:
-            if mode == "notebook":
-                figs = visualizer_agent.create_dashboard_from_notebook(df, "notebook/visualization.ipynb")
-            else:
-                figs = visualizer_agent.create_dashboard(df, analysis_results.get(dataset_name, {}))
-            charts = {k: json.loads(v.to_json()) for k, v in figs.items()}
-            visualization_charts[dataset_name] = charts
-        except Exception as e:
-            logger.error(f"Failed to build visualizations for {dataset_name}: {e}")
-            raise HTTPException(status_code=500, detail="Failed to build visualizations")
-    return charts
 
 @app.post("/upload")
 async def upload_file(file: UploadFile = File(...)):
@@ -644,7 +585,6 @@ async def upload_file(file: UploadFile = File(...)):
         dataset_name = file.filename
         processed_datasets[dataset_name] = df
         analysis_results[dataset_name] = analysis
-        # Visualization disabled
         
         return {
             "status": "success",
@@ -681,14 +621,13 @@ if __name__ == "__main__":
     # Create data directories if they don't exist
     os.makedirs("data/raw", exist_ok=True)
     os.makedirs("data/preprocessed", exist_ok=True)
-    os.makedirs("charts", exist_ok=True)
     # Restore any previously saved datasets
     restored = restore_from_disk()
     logger.info(f"Restored {restored} datasets from disk")
     
     # Log startup information
     logger.info("Starting Job Market Analysis Agentic AI Backend")
-    logger.info(f"Data directories: data/raw, data/preprocessed, charts")
+    logger.info(f"Data directories: data/raw, data/preprocessed")
     logger.info(f"Server will start on http://0.0.0.0:8000")
     logger.info(f"API Documentation: http://0.0.0.0:8000/docs")
     

@@ -17,4 +17,5 @@ scikit-learn==1.3.2
 scipy==1.11.4
 streamlit==1.28.1
 openai
+kaleido
 
