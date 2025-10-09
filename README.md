@@ -28,16 +28,22 @@ An intelligent AI agent that automatically discovers, downloads, preprocesses, a
    cd job-vacancies-agent
    ```
 
-2. **Double-click `start_app.bat`**:
+2. **Install dependencies**:
+
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+3. **Double-click `start_app.bat`**:
 
    - This script will automatically:
      - Create a virtual environment
-     - Install all dependencies
+     - Check if dependencies are installed
      - Create necessary directories
      - Start both backend and frontend servers
    - Two command windows will open (backend and frontend)
 
-3. **Access the Application**:
+4. **Access the Application**:
    - 🌐 **FastAPI Backend**: http://localhost:8000
    - 📚 **API Docs**: http://localhost:8000/docs
    - 🎨 **Streamlit Frontend**: http://localhost:8501

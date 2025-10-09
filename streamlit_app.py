@@ -36,8 +36,23 @@ st.markdown("""
     
     /* Global page styling */
     .main {
-        background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+        background: #000000;
         min-height: 100vh;
+    }
+    
+    /* Streamlit app background */
+    .stApp {
+        background-color: #000000;
+    }
+    
+    /* Sidebar background */
+    .css-1d391kg {
+        background-color: #000000;
+    }
+    
+    /* Main content area */
+    .block-container {
+        background-color: #000000;
     }
     
     /* Beautiful back button */
@@ -314,6 +329,7 @@ def show_landing_page():
         padding-top: 2rem;
         padding-bottom: 2rem;
         max-width: 1200px;
+        background: #000000;
     }
     
     /* Landing header with gradient background */
@@ -366,11 +382,11 @@ def show_landing_page():
         text-align: center;
         margin-bottom: 4rem;
         padding: 3rem 2rem;
-        background: rgba(255, 255, 255, 0.95);
+        background: rgba(26, 26, 26, 0.95);
         backdrop-filter: blur(10px);
         border-radius: 20px;
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        box-shadow: 0 15px 35px rgba(0,0,0,0.1);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        box-shadow: 0 15px 35px rgba(255,255,255,0.1);
         position: relative;
     }
     
@@ -388,7 +404,7 @@ def show_landing_page():
     .intro-section p {
         font-family: 'Inter', sans-serif;
         font-size: 1.3rem;
-        color: #2d3748;
+        color: #ffffff;
         margin: 0;
         line-height: 1.7;
         font-weight: 400;
@@ -403,7 +419,7 @@ def show_landing_page():
         font-family: 'Inter', sans-serif;
         font-size: 2rem;
         font-weight: 600;
-        color: #2d3748;
+        color: #ffffff;
         text-align: center;
         margin-bottom: 2rem;
         position: relative;
@@ -423,14 +439,14 @@ def show_landing_page():
     
     /* Modern dashboard cards */
     .dashboard-card {
-        background: white;
+        background: #1a1a1a;
         border-radius: 20px;
         padding: 2rem;
         text-align: center;
-        box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+        box-shadow: 0 10px 30px rgba(255,255,255,0.1);
         transition: all 0.3s ease;
         cursor: pointer;
-        border: 2px solid transparent;
+        border: 2px solid #333333;
         margin-bottom: 1rem;
         position: relative;
         overflow: hidden;
@@ -449,7 +465,7 @@ def show_landing_page():
     
     .dashboard-card:hover {
         transform: translateY(-8px);
-        box-shadow: 0 20px 40px rgba(0,0,0,0.15);
+        box-shadow: 0 20px 40px rgba(255,255,255,0.2);
         border-color: #667eea;
     }
     
@@ -464,13 +480,13 @@ def show_landing_page():
         font-family: 'Inter', sans-serif;
         font-size: 1.3rem;
         font-weight: 600;
-        color: #2d3748;
+        color: #ffffff;
         margin-bottom: 0.8rem;
     }
     
     .card-desc {
         font-family: 'Inter', sans-serif;
-        color: #718096;
+        color: #cccccc;
         font-size: 0.95rem;
         line-height: 1.5;
         margin-bottom: 1rem;
@@ -526,12 +542,13 @@ def show_landing_page():
     }
     
     .feature-card {
-        background: rgba(255, 255, 255, 0.8);
+        background: rgba(26, 26, 26, 0.8);
         padding: 2rem;
         border-radius: 15px;
         text-align: center;
-        box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+        box-shadow: 0 10px 25px rgba(255,255,255,0.1);
         transition: transform 0.3s ease;
+        border: 1px solid #333333;
     }
     
     .feature-card:hover {
@@ -547,13 +564,13 @@ def show_landing_page():
         font-family: 'Inter', sans-serif;
         font-size: 1.2rem;
         font-weight: 600;
-        color: #2d3748;
+        color: #ffffff;
         margin-bottom: 0.5rem;
     }
     
     .feature-desc {
         font-family: 'Inter', sans-serif;
-        color: #718096;
+        color: #cccccc;
         font-size: 0.95rem;
         line-height: 1.5;
     }

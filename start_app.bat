@@ -39,14 +39,16 @@ if errorlevel 1 (
     exit /b 1
 )
 
-REM Install dependencies
+REM Check if requirements are installed
 echo.
-echo Installing dependencies...
-pip install -r requirements.txt
+echo Checking if dependencies are installed...
+python -c "import fastapi, streamlit, pandas, numpy, plotly, requests" >nul 2>&1
 if errorlevel 1 (
-    echo ERROR: Failed to install dependencies
+    echo WARNING: Some dependencies may not be installed.
+    echo Please run: pip install -r requirements.txt
+    echo.
+    echo Do you want to continue anyway? (Press any key to continue or Ctrl+C to exit)
     pause
-    exit /b 1
 )
 
 REM Create data directories
