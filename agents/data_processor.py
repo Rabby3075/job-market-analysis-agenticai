@@ -267,9 +267,11 @@ class DataProcessorAgent:
                         processed_sheets = {}
                         for sheet_name, sheet_df in all_sheets.items():
                             try:
-                                # Prefer tailored cleaning for ABS 'Data1' sheet where applicable
+                                # Prefer tailored cleaning for specific sheet types
                                 if sheet_name.strip().lower() == 'data1':
                                     processed_sheet = self._process_abs_data1_sheet(sheet_df, str(file_path))
+                                elif '4 digit 3 month average' in sheet_name or 'ivi' in str(file_path).lower():
+                                    processed_sheet = self._process_ivi_sheet(sheet_df, sheet_name)
                                 else:
                                     processed_sheet = self._clean_data(sheet_df)
                                 processed_sheets[sheet_name] = processed_sheet
@@ -399,7 +401,7 @@ class DataProcessorAgent:
 
         # Keep only rows from the first date onward
         date_series = pd.to_datetime(working_df[first_col_name], errors='coerce', dayfirst=True)
-        if date_series.notna().any():
+        if date_series.notna().sum() > 0:
             first_date_idx = date_series.first_valid_index()
             if first_date_idx is not None:
                 working_df = working_df.loc[first_date_idx:]
@@ -424,6 +426,58 @@ class DataProcessorAgent:
         working_df = self._preprocess_data(working_df)
 
         return working_df
+
+    def _process_ivi_sheet(self, df: pd.DataFrame, sheet_name: str) -> pd.DataFrame:
+        """Specialized processor for IVI (Internet Vacancy Index) sheets.
+        
+        Args:
+            df: Raw IVI dataframe
+            sheet_name: Name of the sheet being processed
+            
+        Returns:
+            Processed IVI dataframe
+        """
+        try:
+            logger.info(f"Processing IVI sheet: {sheet_name}")
+            
+            # For IVI data, we want to filter for IT-related jobs only
+            if '4 digit 3 month average' in sheet_name:
+                # Define IT-related ANZSCO codes
+                it_codes = [
+                    '2613',  # Software and Applications Programmers
+                    '2612',  # Multimedia Specialists and Web Developers
+                    '1351',  # ICT Managers
+                    '2621',  # Database and Systems Administrators, and ICT Security Specialists
+                    '3131',  # ICT Support Technicians
+                    '2632',  # ICT Support and Test Engineers
+                    '2631',  # Computer Network Professionals
+                    '2633',  # Telecommunications Engineering Professionals
+                    '2611',  # ICT Business and Systems Analysts
+                    '2324',  # Graphic and Web Designers, and Illustrators
+                    '3132',  # Telecommunications Technical Specialists
+                ]
+                
+                # Filter for IT jobs only
+                if 'ANZSCO_CODE' in df.columns:
+                    it_df = df[df['ANZSCO_CODE'].isin(it_codes)].copy()
+                    logger.info(f"Filtered IVI data to {len(it_df)} IT job records from {len(df)} total records")
+                else:
+                    logger.warning("ANZSCO_CODE column not found in IVI data")
+                    it_df = df.copy()
+                
+                # Convert numeric columns (time series data)
+                for col in it_df.columns:
+                    if col not in ['ANZSCO_CODE', 'ANZSCO_TITLE', 'state']:
+                        it_df[col] = pd.to_numeric(it_df[col], errors='coerce')
+                
+                return it_df
+            else:
+                # For other IVI sheets, just apply basic cleaning
+                return self._clean_data(df)
+                
+        except Exception as e:
+            logger.error(f"Error processing IVI sheet {sheet_name}: {e}")
+            return df
     
     def _remove_empty_columns_abs(self, df: pd.DataFrame) -> pd.DataFrame:
         """Remove empty/placeholder columns from ABS Data1 sheets.
@@ -544,7 +598,7 @@ class DataProcessorAgent:
             if df_clean[col].dtype == 'object':
                 # Check if it's actually numeric
                 numeric_series = pd.to_numeric(df_clean[col], errors='coerce')
-                if not numeric_series.isna().all():
+                if numeric_series.notna().sum() > 0:
                     # If most values are numeric, convert
                     non_null_count = numeric_series.notna().sum()
                     if non_null_count / len(df_clean) > 0.8:  # 80% numeric
@@ -576,7 +630,7 @@ class DataProcessorAgent:
             r'\d{4}-\d{2}-\d{2}',  # YYYY-MM-DD
             r'\d{2}/\d{2}/\d{4}',  # MM/DD/YYYY
             r'\d{2}-\d{2}-\d{4}',  # MM-DD-YYYY
-            r'\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b',  # Month names
+            r'\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b',  # Month names (non-capturing group)
         ]
         
         for pattern in date_patterns:

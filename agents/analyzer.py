@@ -83,7 +83,7 @@ class JobMarketAnalyzer:
         date_columns = df.select_dtypes(include=['datetime64']).columns
         if len(date_columns) > 0:
             for col in date_columns:
-                if df[col].notna().any():
+                if df[col].notna().sum() > 0:
                     time_info['start_date'] = df[col].min().isoformat()
                     time_info['end_date'] = df[col].max().isoformat()
                     time_info['period_type'] = 'date_range'

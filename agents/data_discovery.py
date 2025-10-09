@@ -37,6 +37,15 @@ class DataDiscoveryAgent:
             '3': 'PublicSector',
             '4': 'Industry',
         }
+        
+        # IVI file mappings
+        self._ivi_file_map = {
+            'anzsco4_states': 'internet_vacancies_anzsco4_occupations_states_and_territories_-_august_2025.xlsx',
+            'anzsco4_regions': 'internet_vacancies_anzsco2_occupations_ivi_regions_-_august_2025.xlsx',
+            'anzsco2_states': 'internet_vacancies_anzsco2_occupations_states_and_territories_-_august_2025.xlsx',
+            'anzsco2_regions': 'internet_vacancies_anzsco2_occupations_gccsa_and_sa4_regions_-_august_2025.xlsx',
+            'skill_level': 'internet_vacancies_anzsco_skill_level_states_and_territories_-_august_2025.xlsx'
+        }
 
     def discover_datasets(self, url: str) -> List[Dict]:
         """
@@ -502,3 +511,110 @@ class DataDiscoveryAgent:
             return str(p)
         except Exception:
             return filepath
+
+    def download_ivi_file(self, file_type: str = "anzsco4_states") -> List[str]:
+        """
+        Download IVI (Internet Vacancy Index) files from the Jobs and Skills Australia website
+        
+        Args:
+            file_type: Type of IVI file to download (default: anzsco4_states)
+            
+        Returns:
+            List of downloaded file paths
+        """
+        try:
+            # IVI base URL
+            ivi_base_url = "https://www.jobsandskills.gov.au/data/internet-vacancy-index"
+            
+            logger.info(f"Scraping IVI website: {ivi_base_url}")
+            
+            # First, get the main page to find download links
+            response = self.session.get(ivi_base_url, timeout=60)
+            response.raise_for_status()
+            
+            soup = BeautifulSoup(response.content, 'html.parser')
+            
+            # Look for download links
+            download_links = []
+            
+            # Find only ANZSCO4 states and territories file
+            target_filename = "internet_vacancies_anzsco4_occupations_states_and_territories_-_august_2025.xlsx"
+            
+            for link in soup.find_all('a', href=True):
+                href = link['href']
+                if target_filename in href and href.endswith('.xlsx'):
+                    # Convert relative URLs to absolute
+                    if href.startswith('/'):
+                        download_url = f"https://www.jobsandskills.gov.au{href}"
+                    else:
+                        download_url = href
+                    download_links.append(download_url)
+                    logger.info(f"Found ANZSCO4 download link: {download_url}")
+                    break  # Only get the first match (ANZSCO4 file)
+            
+            if not download_links:
+                # Fallback to direct URL construction if scraping fails
+                filename = self._ivi_file_map.get(file_type, self._ivi_file_map['anzsco4_states'])
+                
+                # Try different possible URL patterns for ANZSCO4 file only
+                anzsco4_filename = "internet_vacancies_anzsco4_occupations_states_and_territories_-_august_2025.xlsx"
+                possible_urls = [
+                    f"https://www.jobsandskills.gov.au/sites/default/files/2025-09/{anzsco4_filename}",
+                    f"https://www.jobsandskills.gov.au/sites/default/files/{anzsco4_filename}",
+                    f"https://www.jobsandskills.gov.au/data/{anzsco4_filename}",
+                    f"https://www.jobsandskills.gov.au/files/{anzsco4_filename}"
+                ]
+                
+                for url in possible_urls:
+                    try:
+                        logger.info(f"Trying fallback URL: {url}")
+                        response = self.session.get(url, timeout=30)
+                        if response.status_code == 200:
+                            download_links = [url]
+                            break
+                    except:
+                        continue
+                
+                if not download_links:
+                    raise Exception(f"Could not find download URL for ANZSCO4 IVI file: {anzsco4_filename}")
+            
+            # Create data/raw directory if it doesn't exist
+            os.makedirs("data/raw", exist_ok=True)
+            
+            downloaded_files = []
+            
+            # Download the files
+            for download_url in download_links:
+                try:
+                    logger.info(f"Downloading IVI file from: {download_url}")
+                    response = self.session.get(download_url, timeout=60)
+                    response.raise_for_status()
+                    
+                    # Extract filename from URL
+                    filename = download_url.split('/')[-1]
+                    if not filename.endswith('.xlsx'):
+                        filename = f"ivi_file_{len(downloaded_files)}.xlsx"
+                    
+                    # Save the file
+                    file_path = os.path.join("data/raw", filename)
+                    with open(file_path, 'wb') as f:
+                        f.write(response.content)
+                    
+                    downloaded_files.append(file_path)
+                    logger.info(f"Successfully downloaded IVI file: {file_path}")
+                    
+                except Exception as e:
+                    logger.error(f"Failed to download from {download_url}: {e}")
+                    continue
+            
+            if not downloaded_files:
+                raise Exception("No IVI files could be downloaded")
+            
+            return downloaded_files
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Failed to download IVI file: {e}")
+            raise Exception(f"Download failed: {str(e)}")
+        except Exception as e:
+            logger.error(f"Error downloading IVI file: {e}")
+            raise Exception(f"Download error: {str(e)}")

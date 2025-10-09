@@ -7,6 +7,8 @@ import glob
 import io
 import json
 import os
+import shutil
+import time
 import warnings
 from datetime import datetime
 
@@ -19,15 +21,200 @@ from agents.data_visualizer import DataVisualizer
 
 # Page configuration
 st.set_page_config(
-    page_title="Job Market Analysis AI",
-    page_icon="🔍",
+    page_title="AU Job Market Analysis using Agentic AI",
+    page_icon="🇦🇺",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
+# Add CSS to make Plotly charts stretch to full width and beautiful global styles
+st.markdown("""
+<style>
+    .stPlotlyChart {
+        width: 100% !important;
+    }
+    
+    /* Global page styling */
+    .main {
+        background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+        min-height: 100vh;
+    }
+    
+    /* Beautiful back button */
+    .back-button {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border: none;
+        padding: 0.8rem 1.5rem;
+        border-radius: 25px;
+        font-family: 'Inter', sans-serif;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+        margin-bottom: 2rem;
+    }
+    
+    .back-button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+    }
+    
+    /* Dashboard header styling */
+    .dashboard-header {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 2rem;
+        border-radius: 15px;
+        margin-bottom: 2rem;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+    }
+    
+    .dashboard-header h1 {
+        margin: 0;
+        font-family: 'Inter', sans-serif;
+        font-weight: 700;
+        font-size: 2.5rem;
+    }
+</style>
+""", unsafe_allow_html=True)
+
 # Silence noisy FutureWarnings from plotly/pandas datetime conversions
 warnings.filterwarnings("ignore", category=FutureWarning, module="_plotly_utils.basevalidators")
 warnings.filterwarnings("ignore", message=".*DatetimeProperties.to_pydatetime is deprecated.*")
+warnings.filterwarnings("ignore", message=".*The keyword arguments have been deprecated.*")
+
+def check_backend_status():
+    """Check if backend server is running"""
+    try:
+        response = requests.get("http://localhost:8000/health", timeout=5)
+        return response.status_code == 200
+    except:
+        return False
+
+def auto_download_abs_latest():
+    """Automatically download and process latest ABS data"""
+    try:
+        # Check backend status first
+        if not check_backend_status():
+            st.error("❌ **Backend server is not running!**\n\nPlease start the backend server first:\n1. Open a new terminal\n2. Run: `python main.py`\n3. Wait for 'Application startup complete'\n4. Then try again")
+            return False
+        
+        with st.spinner("📥 Downloading latest ABS dataset..."):
+            r = requests.post("http://localhost:8000/abs/download", json={"query": "latest"}, timeout=300)
+            if r.status_code != 200:
+                st.error(f"Download failed: {r.text}")
+                return False
+            
+            download_info = r.json()
+            paths = download_info.get("downloaded", [])
+            if not paths:
+                st.warning("No files downloaded.")
+                return False
+            
+        with st.spinner("📊 Processing downloaded files..."):
+            pr = requests.post("http://localhost:8000/process-files", json={"paths": paths}, timeout=600)
+            if pr.status_code != 200:
+                st.error(f"Processing failed: {pr.text}")
+                return False
+            
+            pdata = pr.json()
+            names = pdata.get("processed", [])
+            if names:
+                st.session_state.datasets = {name.get("dataset_name"): {"name": name.get("dataset_name")} for name in names}
+                st.session_state.current_dataset = names[0].get("dataset_name")
+            
+        return True
+        
+    except requests.exceptions.ConnectionError:
+        st.error("❌ **Backend server connection error!**\n\nPlease restart the backend server and try again.")
+        return False
+    except Exception as e:
+        st.error(f"Auto-download error: {e}")
+        return False
+
+def auto_download_and_process_ivi():
+    """Automatically download and process IVI data"""
+    try:
+        # Check backend status first
+        if not check_backend_status():
+            st.error("❌ **Backend server is not running!**\n\nPlease start the backend server first:\n1. Open a new terminal\n2. Run: `python main.py`\n3. Wait for 'Application startup complete'\n4. Then try again")
+            return False
+        
+        with st.spinner("📥 Downloading latest IVI dataset..."):
+            r = requests.post("http://localhost:8000/ivi/download", json={"file_type": "anzsco4_states"}, timeout=300)
+            if r.status_code != 200:
+                st.error(f"Download failed: {r.text}")
+                return False
+            
+            download_info = r.json()
+            paths = download_info.get("downloaded", [])
+            if not paths:
+                st.warning("No files downloaded.")
+                return False
+            
+        with st.spinner("📊 Processing IVI data..."):
+            # Process the downloaded files using the existing preprocessing pipeline
+            pr = requests.post("http://localhost:8000/process-files", json={"paths": paths}, timeout=600)
+            if pr.status_code != 200:
+                st.error(f"Processing failed: {pr.text}")
+                return False
+            
+            pdata = pr.json()
+            names = pdata.get("processed", [])
+            if names:
+                st.session_state.datasets = {name.get("dataset_name"): {"name": name.get("dataset_name")} for name in names}
+                st.session_state.current_dataset = "IVI IT Jobs Dataset"
+            
+        st.success("✅ IVI data downloaded and processed successfully!")
+        return True
+        
+    except requests.exceptions.ConnectionError:
+        st.error("❌ **Backend server connection error!**\n\nPlease restart the backend server and try again.")
+        return False
+    except Exception as e:
+        st.error(f"IVI processing error: {e}")
+        return False
+
+def reset_all_data():
+    """Reset all downloaded datasets and clear cache"""
+    try:
+        # Clear all CSV files in the current directory
+        csv_files = glob.glob("*.csv")
+        for file in csv_files:
+            try:
+                os.remove(file)
+                print(f"Deleted: {file}")
+            except Exception as e:
+                print(f"Error deleting {file}: {e}")
+        
+        # Clear charts directory
+        if os.path.exists("charts"):
+            try:
+                shutil.rmtree("charts")
+                print("Deleted charts directory")
+            except Exception as e:
+                print(f"Error deleting charts directory: {e}")
+        
+        # Clear any other data directories
+        data_dirs = ["data", "downloads", "processed"]
+        for dir_name in data_dirs:
+            if os.path.exists(dir_name):
+                try:
+                    shutil.rmtree(dir_name)
+                    print(f"Deleted {dir_name} directory")
+                except Exception as e:
+                    print(f"Error deleting {dir_name} directory: {e}")
+        
+        # Clear Streamlit cache
+        st.cache_data.clear()
+        
+        # Show success message
+        st.success("✅ All data has been reset successfully!")
+        
+    except Exception as e:
+        st.error(f"❌ Error resetting data: {str(e)}")
+        print(f"Reset error: {e}")
 
 # Custom CSS
 st.markdown("""
@@ -83,64 +270,1320 @@ if not isinstance(st.session_state.datasets, dict):
 def main():
     """Main application function"""
     
-    # Navigation
+    # Initialize session state for current page
+    if 'current_page' not in st.session_state:
+        st.session_state.current_page = 'landing'
+    
+    # Route to appropriate page
+    if st.session_state.current_page == 'landing':
+        show_landing_page()
+    elif st.session_state.current_page == 'abs_dashboard':
+        show_abs_dashboard()
+    elif st.session_state.current_page == 'ivi_dashboard':
+        show_ivi_dashboard()
+    elif st.session_state.current_page == 'combined_view':
+        show_combined_view()
+
+def show_landing_page():
+    """Display the landing page with title, intro, and navigation buttons"""
+    
+    # Add beautiful landing page styles
+    st.markdown("""
+    <style>
+    /* Import Google Fonts */
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+    
+    /* Main container */
+    .main .block-container {
+        padding-top: 2rem;
+        padding-bottom: 2rem;
+        max-width: 1200px;
+    }
+    
+    /* Landing header with gradient background */
+    .landing-header {
+        text-align: center;
+        margin-bottom: 4rem;
+        padding: 4rem 2rem;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        border-radius: 20px;
+        box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+        position: relative;
+        overflow: hidden;
+    }
+    
+    .landing-header::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><pattern id="grain" width="100" height="100" patternUnits="userSpaceOnUse"><circle cx="25" cy="25" r="1" fill="white" opacity="0.1"/><circle cx="75" cy="75" r="1" fill="white" opacity="0.1"/><circle cx="50" cy="10" r="0.5" fill="white" opacity="0.1"/><circle cx="10" cy="60" r="0.5" fill="white" opacity="0.1"/><circle cx="90" cy="40" r="0.5" fill="white" opacity="0.1"/></pattern></defs><rect width="100" height="100" fill="url(%23grain)"/></svg>');
+        opacity: 0.3;
+    }
+    
+    .landing-header h1 {
+        font-family: 'Inter', sans-serif;
+        font-size: 3.5rem;
+        font-weight: 800;
+        color: white;
+        margin-bottom: 1rem;
+        text-shadow: 0 4px 8px rgba(0,0,0,0.3);
+        position: relative;
+        z-index: 1;
+        letter-spacing: -0.02em;
+    }
+    
+    .landing-header .subtitle {
+        font-family: 'Inter', sans-serif;
+        font-size: 1.3rem;
+        color: rgba(255,255,255,0.9);
+        font-weight: 300;
+        position: relative;
+        z-index: 1;
+        margin-top: 1rem;
+    }
+    
+    /* Intro section with glassmorphism effect */
+    .intro-section {
+        text-align: center;
+        margin-bottom: 4rem;
+        padding: 3rem 2rem;
+        background: rgba(255, 255, 255, 0.95);
+        backdrop-filter: blur(10px);
+        border-radius: 20px;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        box-shadow: 0 15px 35px rgba(0,0,0,0.1);
+        position: relative;
+    }
+    
+    .intro-section::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 4px;
+        background: linear-gradient(90deg, #667eea, #764ba2, #f093fb, #f5576c);
+        border-radius: 20px 20px 0 0;
+    }
+    
+    .intro-section p {
+        font-family: 'Inter', sans-serif;
+        font-size: 1.3rem;
+        color: #2d3748;
+        margin: 0;
+        line-height: 1.7;
+        font-weight: 400;
+    }
+    
+    /* Dashboard buttons section */
+    .dashboard-section {
+        margin-top: 3rem;
+    }
+    
+    .dashboard-section h3 {
+        font-family: 'Inter', sans-serif;
+        font-size: 2rem;
+        font-weight: 600;
+        color: #2d3748;
+        text-align: center;
+        margin-bottom: 2rem;
+        position: relative;
+    }
+    
+    .dashboard-section h3::after {
+        content: '';
+        position: absolute;
+        bottom: -10px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 60px;
+        height: 4px;
+        background: linear-gradient(90deg, #667eea, #764ba2);
+        border-radius: 2px;
+    }
+    
+    /* Modern dashboard cards */
+    .dashboard-card {
+        background: white;
+        border-radius: 20px;
+        padding: 2rem;
+        text-align: center;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+        transition: all 0.3s ease;
+        cursor: pointer;
+        border: 2px solid transparent;
+        margin-bottom: 1rem;
+        position: relative;
+        overflow: hidden;
+    }
+    
+    .dashboard-card::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 4px;
+        background: linear-gradient(90deg, #667eea, #764ba2);
+        border-radius: 20px 20px 0 0;
+    }
+    
+    .dashboard-card:hover {
+        transform: translateY(-8px);
+        box-shadow: 0 20px 40px rgba(0,0,0,0.15);
+        border-color: #667eea;
+    }
+    
+    .dashboard-card.coming-soon {
+        opacity: 0.7;
+        background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    }
+    
+    .dashboard-card.coming-soon::before {
+        background: linear-gradient(90deg, #6c757d, #adb5bd);
+    }
+    
+    .card-icon {
+        font-size: 3rem;
+        margin-bottom: 1rem;
+        display: block;
+    }
+    
+    .card-title {
+        font-family: 'Inter', sans-serif;
+        font-size: 1.3rem;
+        font-weight: 600;
+        color: #2d3748;
+        margin-bottom: 0.8rem;
+    }
+    
+    .card-desc {
+        font-family: 'Inter', sans-serif;
+        color: #718096;
+        font-size: 0.95rem;
+        line-height: 1.5;
+        margin-bottom: 1rem;
+    }
+    
+    .card-status {
+        font-family: 'Inter', sans-serif;
+        font-size: 0.85rem;
+        font-weight: 500;
+        padding: 0.3rem 0.8rem;
+        border-radius: 15px;
+        display: inline-block;
+    }
+    
+    .dashboard-card .card-status {
+        background: linear-gradient(135deg, #10b981, #059669);
+        color: white;
+    }
+    
+    .dashboard-card.coming-soon .card-status {
+        background: linear-gradient(135deg, #6b7280, #4b5563);
+        color: white;
+    }
+    
+    /* Dashboard button styling */
+    .stButton button {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+        color: white !important;
+        border: none !important;
+        border-radius: 15px !important;
+        padding: 1rem 1.5rem !important;
+        font-weight: 600 !important;
+        font-size: 1.1rem !important;
+        transition: all 0.3s ease !important;
+        box-shadow: 0 8px 25px rgba(102, 126, 234, 0.3) !important;
+        margin-top: 1rem !important;
+    }
+    
+    .stButton button:hover {
+        transform: translateY(-3px) !important;
+        box-shadow: 0 12px 35px rgba(102, 126, 234, 0.4) !important;
+        background: linear-gradient(135deg, #5a67d8 0%, #6b46c1 100%) !important;
+    }
+    
+    /* Reset button styling */
+    .stButton button[kind="secondary"] {
+        background: linear-gradient(135deg, #ff6b6b, #ee5a52) !important;
+        color: white !important;
+        border: none !important;
+        border-radius: 10px !important;
+        padding: 0.5rem 1rem !important;
+        font-weight: 600 !important;
+        transition: all 0.3s ease !important;
+        box-shadow: 0 4px 15px rgba(255, 107, 107, 0.3) !important;
+        margin-top: 0 !important;
+    }
+    
+    .stButton button[kind="secondary"]:hover {
+        transform: translateY(-2px) !important;
+        box-shadow: 0 6px 20px rgba(255, 107, 107, 0.4) !important;
+        background: linear-gradient(135deg, #ff5252, #d32f2f) !important;
+    }
+    
+    /* Feature highlights */
+    .features-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        gap: 2rem;
+        margin-top: 4rem;
+        padding: 2rem;
+    }
+    
+    .feature-card {
+        background: rgba(255, 255, 255, 0.8);
+        padding: 2rem;
+        border-radius: 15px;
+        text-align: center;
+        box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+        transition: transform 0.3s ease;
+    }
+    
+    .feature-card:hover {
+        transform: translateY(-5px);
+    }
+    
+    .feature-icon {
+        font-size: 3rem;
+        margin-bottom: 1rem;
+    }
+    
+    .feature-title {
+        font-family: 'Inter', sans-serif;
+        font-size: 1.2rem;
+        font-weight: 600;
+        color: #2d3748;
+        margin-bottom: 0.5rem;
+    }
+    
+    .feature-desc {
+        font-family: 'Inter', sans-serif;
+        color: #718096;
+        font-size: 0.95rem;
+        line-height: 1.5;
+    }
+    
+    /* Responsive design */
+    @media (max-width: 768px) {
+        .landing-header h1 {
+            font-size: 2.5rem;
+        }
+        
+        .dashboard-button-container {
+            flex-direction: column;
+            align-items: center;
+        }
+        
+        .dashboard-button {
+            min-width: 100%;
+            max-width: 300px;
+        }
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    # Title / Banner with subtitle
+    st.markdown("""
+    <div class="landing-header">
+        <h1>🇦🇺 AU Job Market Analysis using Agentic AI</h1>
+        <div class="subtitle">Powered by Advanced AI Agents • Real-time Data Analysis • Predictive Insights</div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Short intro text with glassmorphism
+    st.markdown("""
+    <div class="intro-section">
+        <p>Explore Australian IT job market trends from ABS & IVI datasets.<br>
+        Use natural language queries or dashboards to analyze demand over time, including COVID impacts.</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Feature highlights
+    st.markdown("""
+    <div class="features-grid">
+        <div class="feature-card">
+            <div class="feature-icon">🤖</div>
+            <div class="feature-title">AI-Powered Analysis</div>
+            <div class="feature-desc">Advanced machine learning algorithms provide deep insights into job market trends</div>
+        </div>
+        <div class="feature-card">
+            <div class="feature-icon">📊</div>
+            <div class="feature-title">Interactive Dashboards</div>
+            <div class="feature-desc">Beautiful, responsive visualizations that adapt to your data exploration needs</div>
+        </div>
+        <div class="feature-card">
+            <div class="feature-icon">🔮</div>
+            <div class="feature-title">Predictive Forecasting</div>
+            <div class="feature-desc">5-year predictions with confidence intervals for strategic planning</div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Dashboard selection section with modern cards
+    st.markdown("""
+    <div class="dashboard-section">
+        <h3>Choose Your Analysis Dashboard</h3>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Modern dashboard cards with proper buttons
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.markdown("""
+        <div class="dashboard-card">
+            <div class="card-icon">📊</div>
+            <div class="card-title">ABS Dataset Dashboard</div>
+            <div class="card-desc">Analyze Australian job market data from ABS sources</div>
+            <div class="card-status">Available</div>
+        </div>
+        """, unsafe_allow_html=True)
+        if st.button("📊 ABS Dataset Dashboard", key="abs_dashboard", use_container_width=True):
+            # Automatically download and process latest ABS data
+            if auto_download_abs_latest():
+                st.session_state.current_page = "abs_dashboard"
+                st.success("✅ Latest ABS data downloaded and processed successfully!")
+                st.rerun()
+            else:
+                st.error("❌ Failed to download ABS data. Please check backend connection.")
+    
+    with col2:
+        st.markdown("""
+        <div class="dashboard-card coming-soon">
+            <div class="card-icon">💻</div>
+            <div class="card-title">IVI (IT Jobs) Dashboard</div>
+            <div class="card-desc">IT job market analysis from IVI datasets</div>
+            <div class="card-status">Coming Soon</div>
+        </div>
+        """, unsafe_allow_html=True)
+        if st.button("💻 IVI (IT Jobs) Dashboard", key="ivi_dashboard", use_container_width=True):
+            # Automatically download and process IVI data
+            if auto_download_and_process_ivi():
+                st.session_state.current_page = "ivi_dashboard"
+                st.rerun()
+            else:
+                st.error("❌ Failed to download and process IVI data. Please check backend connection.")
+    
+    with col3:
+        st.markdown("""
+        <div class="dashboard-card coming-soon">
+            <div class="card-icon">🔄</div>
+            <div class="card-title">Combined View</div>
+            <div class="card-desc">Integrated analysis from both ABS and IVI</div>
+            <div class="card-status">Coming Soon</div>
+        </div>
+        """, unsafe_allow_html=True)
+        if st.button("🔄 Combined View", key="combined_view", use_container_width=True):
+            st.session_state.current_page = "combined_view"
+            st.rerun()
+
+def show_abs_dashboard():
+    """Display the ABS Dataset Dashboard (existing functionality)"""
+    
+    # Add navigation buttons
+    col1, col2, col3 = st.columns([1, 2, 1])
+    
+    with col1:
+        if st.button("← Back to Home", key="back_from_abs"):
+            st.session_state.current_page = "landing"
+            st.rerun()
+    
+    with col3:
+        if st.button("🗑️ Reset All Data", key="reset_data", type="secondary"):
+            reset_all_data()
+            st.session_state.current_page = "landing"
+            st.rerun()
+    
+    # Beautiful dashboard header
+    st.markdown("""
+    <div class="dashboard-header">
+        <h1>📊 ABS Dataset Dashboard</h1>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Modern navigation styling for ABS dashboard
     st.markdown("""
     <style>
     .nav-container {
         display: flex;
+        gap: 1rem;
+        margin: 2rem 0;
         justify-content: center;
+        background: rgba(255, 255, 255, 0.1);
+        padding: 1rem;
+        border-radius: 20px;
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+    
+    /* Modern sidebar styling */
+    .css-1d391kg {
+        background: linear-gradient(180deg, #1a1a2e 0%, #16213e 100%);
+        border-right: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    
+    .css-1d391kg .stSelectbox > div > div {
+        background: rgba(255, 255, 255, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 10px;
+        color: white;
+    }
+    
+    .css-1d391kg .stTextInput > div > div > input {
+        background: rgba(255, 255, 255, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 10px;
+        color: white;
+    }
+    
+    .css-1d391kg .stButton > button {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border: none;
+        border-radius: 10px;
+        font-weight: 600;
+        transition: all 0.3s ease;
+    }
+    
+    .css-1d391kg .stButton > button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+    }
+    
+    /* Main content area styling */
+    .main .block-container {
+        background: linear-gradient(135deg, #0f0f23 0%, #1a1a2e 100%);
+        border-radius: 20px;
+        padding: 2rem;
+        margin: 1rem;
+        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+    }
+    
+    
+    /* Welcome section styling */
+    .welcome-section {
+        background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+        padding: 3rem;
+        border-radius: 20px;
+        text-align: center;
+        margin: 2rem 0;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    
+    .welcome-section h1 {
+        color: #667eea;
+        font-size: 2.5rem;
+        margin-bottom: 1rem;
+        font-weight: 700;
+    }
+    
+    .welcome-section p {
+        color: #e2e8f0;
+        font-size: 1.2rem;
         margin-bottom: 2rem;
     }
+    
+    .capabilities-list {
+        text-align: left;
+        max-width: 600px;
+        margin: 0 auto;
+    }
+    
+    .capabilities-list li {
+        color: #cbd5e0;
+        margin-bottom: 0.8rem;
+        font-size: 1.1rem;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    # Navigation buttons for ABS dashboard
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.markdown('<div class="nav-container">', unsafe_allow_html=True)
+        
+        # Check current ABS page
+        if 'abs_current_page' not in st.session_state:
+            st.session_state.abs_current_page = 'analysis'
+        
+        # Analysis page button
+        if st.button("📊 Data Analysis", key="nav_analysis", 
+                    type="primary" if st.session_state.abs_current_page == 'analysis' else "secondary"):
+            st.session_state.abs_current_page = 'analysis'
+            st.rerun()
+        
+        # Visualization page button  
+        if st.button("📈 Visualizations", key="nav_viz",
+                    type="primary" if st.session_state.abs_current_page == 'visualizations' else "secondary"):
+            st.session_state.abs_current_page = 'visualizations'
+            st.rerun()
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Route to appropriate ABS page
+    if st.session_state.abs_current_page == 'analysis':
+        show_analysis_page()
+    elif st.session_state.abs_current_page == 'visualizations':
+        show_visualizations_page()
+
+def show_ivi_dashboard():
+    """Display the IVI Dashboard (same as ABS dashboard)"""
+    
+    # Add navigation buttons
+    col1, col2, col3 = st.columns([1, 2, 1])
+    
+    with col1:
+        if st.button("← Back to Home", key="back_from_ivi"):
+            st.session_state.current_page = "landing"
+            st.rerun()
+    
+    with col3:
+        if st.button("🗑️ Reset All Data", key="reset_data_ivi", type="secondary"):
+            reset_all_data()
+            st.session_state.current_page = "landing"
+            st.rerun()
+    
+    # Beautiful dashboard header
+    st.markdown("""
+    <div class="dashboard-header">
+        <h1>💻 IVI (IT Jobs) Dashboard</h1>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Modern navigation styling for IVI dashboard
+    st.markdown("""
+    <style>
+    .nav-container {
+        display: flex;
+        gap: 1rem;
+        margin: 2rem 0;
+    }
     .nav-button {
-        background-color: #f0f2f6;
-        border: 2px solid #1f77b4;
-        color: #1f77b4;
-        padding: 10px 20px;
-        margin: 0 10px;
-        border-radius: 8px;
-        text-decoration: none;
-        font-weight: bold;
-        transition: all 0.3s;
+        flex: 1;
+        padding: 1rem;
+        border: 2px solid #667eea;
+        border-radius: 10px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        text-align: center;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.3s ease;
     }
     .nav-button:hover {
-        background-color: #1f77b4;
-        color: white;
+        transform: translateY(-2px);
+        box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
     }
     .nav-button.active {
-        background-color: #1f77b4;
-        color: white;
+        background: linear-gradient(135deg, #ff6b6b 0%, #ee5a52 100%);
+        border-color: #ff6b6b;
     }
     </style>
     """, unsafe_allow_html=True)
     
     # Navigation buttons
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        st.markdown('<div class="nav-container">', unsafe_allow_html=True)
-        
-        # Check current page
-        if 'current_page' not in st.session_state:
-            st.session_state.current_page = 'analysis'
-        
-        # Analysis page button
-        if st.button("📊 Data Analysis", key="nav_analysis", 
-                    type="primary" if st.session_state.current_page == 'analysis' else "secondary"):
-            st.session_state.current_page = 'analysis'
-            st.rerun()
-        
-        # Visualization page button  
-        if st.button("📈 Visualizations", key="nav_viz",
-                    type="primary" if st.session_state.current_page == 'visualizations' else "secondary"):
-            st.session_state.current_page = 'visualizations'
-            st.rerun()
-        
-        st.markdown('</div>', unsafe_allow_html=True)
+    col_nav1, col_nav2 = st.columns(2)
     
-    # Route to appropriate page
-    if st.session_state.current_page == 'analysis':
-        show_analysis_page()
-    elif st.session_state.current_page == 'visualizations':
-        show_visualizations_page()
+    with col_nav1:
+        if st.button("📊 Data Analysis", key="ivi_analysis", type="primary"):
+            st.session_state.ivi_current_page = "analysis"
+            st.rerun()
+    
+    with col_nav2:
+        if st.button("📈 Visualizations", key="ivi_viz"):
+            st.session_state.ivi_current_page = "visualizations"
+            st.rerun()
+    
+    # Set default page and ensure proper dataset name
+    if 'ivi_current_page' not in st.session_state:
+        st.session_state.ivi_current_page = 'analysis'
+    
+    # Ensure IVI dataset name is set
+    if 'current_dataset' not in st.session_state or st.session_state.current_dataset is None or 'ivi' not in str(st.session_state.current_dataset).lower():
+        st.session_state.current_dataset = 'IVI IT Jobs Dataset'
+    
+    # Show appropriate page
+    if st.session_state.ivi_current_page == 'analysis':
+        show_ivi_analysis_page()
+    elif st.session_state.ivi_current_page == 'visualizations':
+        show_ivi_visualizations_page()
+
+def show_ivi_analysis_page():
+    """Display IVI data analysis page (same as ABS)"""
+    st.markdown("## 🔍 Job Market Analysis")
+    
+    # Set proper dataset name for IVI
+    dataset_name = st.session_state.get('current_dataset', 'IVI IT Jobs Dataset')
+    if dataset_name is None or ('ivi' not in str(dataset_name).lower() and 'anzsco4' not in str(dataset_name).lower()):
+        dataset_name = 'IVI IT Jobs Dataset'
+    
+    st.markdown(f"### 📊 Analysis: {dataset_name}")
+    
+    # Load and display the dataset
+    try:
+        # Find the CSV file in data/preprocessed/ (check both direct files and subfolders)
+        csv_files = []
+        if os.path.exists("data/preprocessed"):
+            # Check direct files
+            for file in os.listdir("data/preprocessed"):
+                if file.endswith(".csv") and "ivi" in file.lower():
+                    csv_files.append(os.path.join("data/preprocessed", file))
+            
+            # Check subfolders for IVI data
+            for item in os.listdir("data/preprocessed"):
+                item_path = os.path.join("data/preprocessed", item)
+                if os.path.isdir(item_path) and "anzsco4" in item.lower():
+                    for file in os.listdir(item_path):
+                        if file.endswith(".csv") and "4_digit" in file:
+                            csv_files.append(os.path.join(item_path, file))
+        
+        if csv_files:
+            # Use the IT jobs CSV file (should be the one with "4_digit" in name)
+            it_jobs_file = None
+            for csv_file in csv_files:
+                if "4_digit" in csv_file:
+                    it_jobs_file = csv_file
+                    break
+            
+            if not it_jobs_file:
+                it_jobs_file = csv_files[0]  # Fallback to first file
+            
+            # Load the dataset
+            df = pd.read_csv(it_jobs_file)
+            
+            # Dataset Information (after analysis, before preview)
+            st.markdown("### 📊 Dataset Information")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.metric("Total Rows", f"{len(df):,}")
+            with col2:
+                st.metric("Total Columns", f"{len(df.columns):,}")
+            
+            # Data Preview (after dataset info)
+            st.markdown("### 📄 Data Preview")
+            st.dataframe(df.head(10))
+            
+        else:
+            st.warning("No processed IVI data found. Please click the IVI Dashboard button to download and process the data.")
+            
+    except Exception as e:
+        st.error(f"Error loading IVI data: {e}")
+
+def show_ivi_visualizations_page():
+    """Display IVI visualizations page with all 6 charts"""
+    st.markdown("## 📈 IVI Visualizations")
+    
+    # Load IVI data
+    try:
+        # Find the CSV file in data/preprocessed/
+        csv_files = []
+        if os.path.exists("data/preprocessed"):
+            # Check subfolders for IVI data
+            for item in os.listdir("data/preprocessed"):
+                item_path = os.path.join("data/preprocessed", item)
+                if os.path.isdir(item_path) and "anzsco4" in item.lower():
+                    for file in os.listdir(item_path):
+                        if file.endswith(".csv") and "4_digit" in file:
+                            csv_files.append(os.path.join(item_path, file))
+        
+        if not csv_files:
+            st.warning("No processed IVI data found. Please process the data first.")
+            return
+            
+        # Load the IT jobs data
+        it_jobs_file = csv_files[0]
+        df = pd.read_csv(it_jobs_file)
+        
+        # Initialize visualizer
+        from agents.data_visualizer import DataVisualizer
+        visualizer = DataVisualizer()
+        
+        # Create visualization tabs
+        tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
+                    "📈 Trend Over Time", 
+                    "🗺️ State Distribution", 
+                    "🏆 Top Occupations",
+                    "📊 YoY Growth",
+                    "🔥 Heatmap",
+                    "🦠 COVID Impact",
+                    "📈 Growth Rate Summary",
+                    "🗺️ Forecast by State",
+                    "👥 Forecast by Occupation"
+                ])
+        
+        with tab1:
+            st.markdown("### 📈 IT Job Vacancies Trend Over Time")
+            st.markdown("Shows how job demand has evolved over time, identifying COVID dips and growth phases.")
+            
+            chart = visualizer.chart_ivi_trend_over_time(df)
+            if chart:
+                st.plotly_chart(chart, use_container_width=True, config={'displayModeBar': False})
+                
+                # Show summary stats
+                date_columns = [col for col in df.columns if col not in ['ANZSCO_CODE', 'ANZSCO_TITLE', 'state']]
+                monthly_totals = [df[col].sum() for col in date_columns if col in df.columns]
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Peak Vacancies", f"{max(monthly_totals):,.0f}")
+                with col2:
+                    st.metric("Lowest Vacancies", f"{min(monthly_totals):,.0f}")
+                with col3:
+                    latest = monthly_totals[-1] if monthly_totals else 0
+                    previous = monthly_totals[-2] if len(monthly_totals) > 1 else latest
+                    change = ((latest - previous) / previous * 100) if previous != 0 else 0
+                    st.metric("Latest Change", f"{change:+.1f}%")
+            else:
+                st.error("Error creating trend chart")
+            
+        with tab2:
+            st.markdown("### 🗺️ IT Job Vacancies by State/Territory")
+            st.markdown("Interactive map showing IT job vacancies across Australian states and territories. Hover over regions to see detailed vacancy counts.")
+            
+            chart = visualizer.chart_ivi_state_distribution(df)
+            if chart:
+                st.plotly_chart(chart, use_container_width=True, config={'displayModeBar': False})
+                
+                # Show state ranking (exclude AUST - national total)
+                numeric_cols = [col for col in df.columns if col not in ['ANZSCO_CODE', 'ANZSCO_TITLE', 'state']]
+                state_totals = df[df['state'] != 'AUST'].groupby('state')[numeric_cols].sum().sum(axis=1)
+                state_ranking = state_totals.sort_values(ascending=False)
+                
+                st.markdown("#### 🏆 State Rankings")
+                for i, (state, vacancies) in enumerate(state_ranking.items(), 1):
+                    st.write(f"{i}. **{state}**: {vacancies:,.0f} vacancies")
+            else:
+                st.error("Error creating state distribution chart")
+            
+        with tab3:
+            st.markdown("### 🏆 Top IT Occupations by Vacancies")
+            st.markdown("Identify the most in-demand IT roles based on total vacancy counts. Displayed as a horizontal bar chart.")
+            
+            chart = visualizer.chart_ivi_top_occupations(df, top_n=10)
+            if chart:
+                st.plotly_chart(chart, use_container_width=True, config={'displayModeBar': False})
+                
+                # Show detailed breakdown
+                numeric_cols = [col for col in df.columns if col not in ['ANZSCO_CODE', 'ANZSCO_TITLE', 'state']]
+                occupation_totals = df.groupby('ANZSCO_TITLE')[numeric_cols].sum().sum(axis=1)
+                top_occupations = occupation_totals.nlargest(10)
+                
+                st.markdown("#### 📊 Detailed Breakdown")
+                for i, (occupation, vacancies) in enumerate(top_occupations.items(), 1):
+                    percentage = (vacancies / occupation_totals.sum()) * 100
+                    st.write(f"{i}. **{occupation}**: {vacancies:,.0f} vacancies ({percentage:.1f}%)")
+            else:
+                st.error("Error creating top occupations chart")
+            
+        with tab4:
+            st.markdown("### 📊 Year-on-Year Growth in IT Job Vacancies")
+            st.markdown("Highlights boom or decline periods in IT job market.")
+            
+            chart = visualizer.chart_ivi_yoy_growth(df)
+            if chart:
+                st.plotly_chart(chart, use_container_width=True, config={'displayModeBar': False})
+                
+                # Show growth summary
+                date_columns = [col for col in df.columns if col not in ['ANZSCO_CODE', 'ANZSCO_TITLE', 'state']]
+                dates = pd.to_datetime(date_columns, errors='coerce')
+                years = pd.Series([d.year if pd.notna(d) else None for d in dates])
+                
+                annual_totals = {}
+                for i, col in enumerate(date_columns):
+                    if pd.notna(years[i]):
+                        year = int(years[i])
+                        if year not in annual_totals:
+                            annual_totals[year] = 0
+                        annual_totals[year] += df[col].sum()
+                
+                years_sorted = sorted(annual_totals.keys())
+                yoy_growth = []
+                for i in range(1, len(years_sorted)):
+                    current_total = annual_totals[years_sorted[i]]
+                    previous_total = annual_totals[years_sorted[i-1]]
+                    if previous_total > 0:
+                        growth = ((current_total - previous_total) / previous_total) * 100
+                        yoy_growth.append(growth)
+                
+                if yoy_growth:
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("Highest Growth", f"{max(yoy_growth):+.1f}%")
+                    with col2:
+                        st.metric("Biggest Decline", f"{min(yoy_growth):+.1f}%")
+                    with col3:
+                        avg_growth = sum(yoy_growth) / len(yoy_growth)
+                        st.metric("Average Growth", f"{avg_growth:+.1f}%")
+            else:
+                st.error("Error creating YoY growth chart")
+            
+        with tab5:
+            st.markdown("### 🔥 IT Vacancies: Occupation vs State Heatmap")
+            st.markdown("Detect regional specialization patterns across IT occupations and states.")
+            
+            chart = visualizer.chart_ivi_occupation_state_heatmap(df)
+            if chart:
+                st.plotly_chart(chart, use_container_width=True, config={'displayModeBar': False})
+                
+                # Show insights
+                numeric_cols = [col for col in df.columns if col not in ['ANZSCO_CODE', 'ANZSCO_TITLE', 'state']]
+                heatmap_data = df.groupby(['ANZSCO_TITLE', 'state'])[numeric_cols].sum().sum(axis=1)
+                heatmap_pivot = heatmap_data.unstack(fill_value=0)
+                
+                st.markdown("#### 🔍 Key Insights")
+                max_vacancies = heatmap_pivot.max().max()
+                max_location = heatmap_pivot.stack().idxmax()
+                st.write(f"**Highest vacancy concentration**: {max_location[0]} in {max_location[1]} ({max_vacancies:,.0f} vacancies)")
+                
+                # Show top 3 combinations
+                top_combinations = heatmap_pivot.stack().nlargest(3)
+                st.write("**Top 3 Occupation-State combinations:**")
+                for i, ((occupation, state), vacancies) in enumerate(top_combinations.items(), 1):
+                    st.write(f"{i}. {occupation} in {state}: {vacancies:,.0f} vacancies")
+            else:
+                st.error("Error creating heatmap")
+            
+        with tab6:
+            st.markdown("### 🦠 COVID Impact on IT Job Market")
+            st.markdown("Highlight the fall and recovery phases for IT roles during COVID-19.")
+            
+            chart = visualizer.chart_ivi_covid_impact(df)
+            if chart:
+                st.plotly_chart(chart, use_container_width=True, config={'displayModeBar': False})
+                
+                # Calculate impact metrics
+                date_columns = [col for col in df.columns if col not in ['ANZSCO_CODE', 'ANZSCO_TITLE', 'state']]
+                dates = pd.to_datetime(date_columns, errors='coerce')
+                
+                before_covid = []
+                during_covid = []
+                after_covid = []
+                
+                for i, col in enumerate(date_columns):
+                    if i < len(dates) and pd.notna(dates[i]):
+                        date = dates[i]
+                        covid_start = pd.Timestamp('2020-03-01')
+                        covid_end = pd.Timestamp('2022-01-01')
+                        if date < covid_start:
+                            before_covid.append(df[col].sum())
+                        elif date >= covid_start and date < covid_end:
+                            during_covid.append(df[col].sum())
+                        else:
+                            after_covid.append(df[col].sum())
+                
+                before_avg = sum(before_covid) / len(before_covid) if before_covid else 0
+                during_avg = sum(during_covid) / len(during_covid) if during_covid else 0
+                after_avg = sum(after_covid) / len(after_covid) if after_covid else 0
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    decline = ((during_avg - before_avg) / before_avg * 100) if before_avg > 0 else 0
+                    st.metric("COVID Impact", f"{decline:+.1f}%", delta=f"{decline:+.1f}%")
+                with col2:
+                    recovery = ((after_avg - during_avg) / during_avg * 100) if during_avg > 0 else 0
+                    st.metric("Recovery Rate", f"{recovery:+.1f}%", delta=f"{recovery:+.1f}%")
+                with col3:
+                    net_change = ((after_avg - before_avg) / before_avg * 100) if before_avg > 0 else 0
+                    st.metric("Net Change", f"{net_change:+.1f}%", delta=f"{net_change:+.1f}%")
+                
+                # Show timeline
+                st.markdown("#### 📅 Timeline Analysis")
+                st.write(f"**Pre-COVID Average**: {before_avg:,.0f} monthly vacancies")
+                st.write(f"**During COVID Average**: {during_avg:,.0f} monthly vacancies")
+                st.write(f"**Post-COVID Average**: {after_avg:,.0f} monthly vacancies")
+            else:
+                st.error("Error creating COVID impact chart")
+        
+        with tab7:
+            st.markdown("### 📈 IT Job Vacancies: Growth Rate Summary")
+            st.markdown("Visualize percentage growth between last historical point and forecasted endpoint.")
+            
+            # Forecast periods selector
+            forecast_periods = st.slider("Forecast Periods (months)", 3, 24, 8, key="forecast_periods_growth")
+            
+            # Growth rate summary
+            try:
+                date_columns = [col for col in df.columns if col not in ['ANZSCO_CODE', 'ANZSCO_TITLE', 'state']]
+                monthly_totals = [df[col].sum() for col in date_columns if col in df.columns]
+                
+                if len(monthly_totals) >= 12:
+                    import numpy as np
+                    from sklearn.linear_model import LinearRegression
+                    import plotly.graph_objects as go
+                    
+                    # Use simple numeric x-axis
+                    X = np.arange(len(monthly_totals)).reshape(-1, 1)
+                    y = np.array(monthly_totals)
+                    
+                    model = LinearRegression()
+                    model.fit(X, y)
+                    
+                    # Generate forecast
+                    forecast_X = np.arange(len(monthly_totals), len(monthly_totals) + forecast_periods).reshape(-1, 1)
+                    forecast_y = model.predict(forecast_X)
+                    
+                    # Create simple x-axis labels
+                    historical_x = list(range(len(monthly_totals)))
+                    forecast_x = list(range(len(monthly_totals), len(monthly_totals) + forecast_periods))
+                    
+                    fig = go.Figure()
+                    
+                    # Historical data
+                    fig.add_trace(go.Scatter(
+                        x=historical_x,
+                        y=monthly_totals,
+                        mode='lines+markers',
+                        name='Historical',
+                        line=dict(color='#667eea', width=3),
+                        marker=dict(size=6, color='#667eea')
+                    ))
+                    
+                    # Forecast data
+                    fig.add_trace(go.Scatter(
+                        x=forecast_x,
+                        y=forecast_y,
+                        mode='lines+markers',
+                        name='Forecast',
+                        line=dict(color='#ff6b6b', width=3, dash='dash'),
+                        marker=dict(size=6, color='#ff6b6b')
+                    ))
+                    
+                    # Add growth rate annotation
+                    last_historical = monthly_totals[-1]
+                    forecast_endpoint = forecast_y[-1]
+                    growth_rate = ((forecast_endpoint - last_historical) / last_historical) * 100
+                    
+                    fig.add_annotation(
+                        x=forecast_x[-1],
+                        y=forecast_endpoint,
+                        text=f"Growth: {growth_rate:+.1f}%",
+                        showarrow=True,
+                        arrowhead=2,
+                        arrowcolor="green" if growth_rate > 0 else "red",
+                        ax=0, ay=-40,
+                        bgcolor="white",
+                        bordercolor="gray",
+                        font=dict(size=12, color='#2d3748')
+                    )
+                    
+                    fig.update_layout(
+                        title="IT Job Vacancies: Growth Rate Summary",
+                        xaxis_title="Time Period",
+                        yaxis_title="Job Vacancies",
+                        hovermode='x unified',
+                        showlegend=True,
+                        plot_bgcolor='white',
+                        paper_bgcolor='white',
+                        font=dict(color='#2d3748'),
+                        margin=dict(l=50, r=50, t=80, b=50)
+                    )
+                    
+                    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+                    
+                    # Show growth rate metrics
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("Historical End", f"{last_historical:,.0f}")
+                    with col2:
+                        st.metric("Forecast End", f"{forecast_endpoint:,.0f}")
+                    with col3:
+                        st.metric("Growth Rate", f"{growth_rate:+.1f}%", 
+                                delta=f"{growth_rate:+.1f}%" if growth_rate != 0 else None)
+                else:
+                    st.error("Insufficient data for forecasting")
+            except Exception as e:
+                st.error(f"Error creating growth rate summary: {e}")
+        
+        with tab8:
+            st.markdown("### 🗺️ IT Job Vacancies: Forecast by State")
+            st.markdown("Forecast future vacancies separately for each state with individual trend lines.")
+            
+            # Forecast periods selector
+            forecast_periods = st.slider("Forecast Periods (months)", 3, 24, 8, key="forecast_periods_state")
+            
+            # Forecast by state
+            try:
+                import numpy as np
+                from sklearn.linear_model import LinearRegression
+                import plotly.graph_objects as go
+                
+                date_columns = [col for col in df.columns if col not in ['ANZSCO_CODE', 'ANZSCO_TITLE', 'state']]
+                
+                fig = go.Figure()
+                
+                # Get unique states (excluding AUST)
+                states = [state for state in df['state'].unique() if state != 'AUST']
+                colors = ['#667eea', '#ff6b6b', '#4ecdc4', '#45b7d1', '#96ceb4', '#feca57', '#ff9ff3', '#54a0ff']
+                
+                for i, state in enumerate(states[:8]):  # Limit to 8 states for readability
+                    state_data = df[df['state'] == state]
+                    state_monthly = []
+                    
+                    for col in date_columns:
+                        state_monthly.append(state_data[col].sum())
+                    
+                    if len(state_monthly) >= 12:
+                        # Historical data
+                        historical_x = list(range(len(state_monthly)))
+                        fig.add_trace(go.Scatter(
+                            x=historical_x,
+                            y=state_monthly,
+                            mode='lines+markers',
+                            name=f'{state} (Historical)',
+                            line=dict(color=colors[i % len(colors)], width=2),
+                            marker=dict(size=4)
+                        ))
+                        
+                        # Forecast
+                        X = np.arange(len(state_monthly)).reshape(-1, 1)
+                        y = np.array(state_monthly)
+                        
+                        model = LinearRegression()
+                        model.fit(X, y)
+                        
+                        forecast_X = np.arange(len(state_monthly), len(state_monthly) + forecast_periods).reshape(-1, 1)
+                        forecast_y = model.predict(forecast_X)
+                        
+                        # Forecast x-axis
+                        forecast_x = list(range(len(state_monthly), len(state_monthly) + forecast_periods))
+                        
+                        fig.add_trace(go.Scatter(
+                            x=forecast_x,
+                            y=forecast_y,
+                            mode='lines+markers',
+                            name=f'{state} (Forecast)',
+                            line=dict(color=colors[i % len(colors)], width=2, dash='dash'),
+                            marker=dict(size=4)
+                        ))
+                
+                fig.update_layout(
+                    title="IT Job Vacancies: Forecast by State",
+                    xaxis_title="Time Period",
+                    yaxis_title="Job Vacancies",
+                    hovermode='x unified',
+                    showlegend=True,
+                    plot_bgcolor='white',
+                    paper_bgcolor='white',
+                    font=dict(color='#2d3748'),
+                    margin=dict(l=50, r=50, t=80, b=50)
+                )
+                
+                st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+                
+                # Show state forecast summary
+                st.markdown("#### 📊 State Forecast Summary")
+                state_forecasts = {}
+                
+                for state in states:
+                    state_data = df[df['state'] == state]
+                    state_monthly = []
+                    
+                    for col in date_columns:
+                        state_monthly.append(state_data[col].sum())
+                    
+                    if len(state_monthly) >= 12:
+                        X = np.arange(len(state_monthly)).reshape(-1, 1)
+                        y = np.array(state_monthly)
+                        
+                        model = LinearRegression()
+                        model.fit(X, y)
+                        
+                        last_value = state_monthly[-1]
+                        forecast_X = np.array([[len(state_monthly) + forecast_periods - 1]])
+                        forecast_value = model.predict(forecast_X)[0]
+                        growth = ((forecast_value - last_value) / last_value * 100) if last_value > 0 else 0
+                        
+                        state_forecasts[state] = {
+                            'current': last_value,
+                            'forecast': forecast_value,
+                            'growth': growth
+                        }
+                
+                # Display top 5 states by growth
+                if state_forecasts:
+                    sorted_states = sorted(state_forecasts.items(), key=lambda x: x[1]['growth'], reverse=True)
+                    
+                    for i, (state, data) in enumerate(sorted_states[:5], 1):
+                        col1, col2, col3, col4 = st.columns(4)
+                        with col1:
+                            st.write(f"**{i}. {state}**")
+                        with col2:
+                            st.write(f"Current: {data['current']:,.0f}")
+                        with col3:
+                            st.write(f"Forecast: {data['forecast']:,.0f}")
+                        with col4:
+                            st.write(f"Growth: {data['growth']:+.1f}%")
+            except Exception as e:
+                st.error(f"Error creating forecast by state chart: {e}")
+        
+        with tab9:
+            st.markdown("### 👥 IT Job Vacancies: Forecast by Occupation")
+            st.markdown("Forecast specific IT occupations with individual trend analysis.")
+            
+            # Forecast parameters
+            col1, col2 = st.columns(2)
+            with col1:
+                forecast_periods = st.slider("Forecast Periods (months)", 3, 24, 8, key="forecast_periods_occupation")
+            with col2:
+                top_n = st.slider("Top N Occupations", 3, 10, 5, key="top_n_occupations")
+            
+            # Forecast by occupation
+            try:
+                import numpy as np
+                from sklearn.linear_model import LinearRegression
+                import plotly.graph_objects as go
+                
+                date_columns = [col for col in df.columns if col not in ['ANZSCO_CODE', 'ANZSCO_TITLE', 'state']]
+                
+                # Get top occupations by total vacancies
+                occupation_totals = df.groupby('ANZSCO_TITLE')[date_columns].sum().sum(axis=1)
+                top_occupations = occupation_totals.nlargest(top_n).index.tolist()
+                
+                fig = go.Figure()
+                colors = ['#667eea', '#ff6b6b', '#4ecdc4', '#45b7d1', '#96ceb4', '#feca57', '#ff9ff3', '#54a0ff']
+                
+                for i, occupation in enumerate(top_occupations):
+                    occ_data = df[df['ANZSCO_TITLE'] == occupation]
+                    occ_monthly = []
+                    
+                    for col in date_columns:
+                        occ_monthly.append(occ_data[col].sum())
+                    
+                    if len(occ_monthly) >= 12:
+                        # Historical data
+                        historical_x = list(range(len(occ_monthly)))
+                        fig.add_trace(go.Scatter(
+                            x=historical_x,
+                            y=occ_monthly,
+                            mode='lines+markers',
+                            name=f'{occupation[:30]}... (Historical)' if len(occupation) > 30 else f'{occupation} (Historical)',
+                            line=dict(color=colors[i % len(colors)], width=2),
+                            marker=dict(size=4)
+                        ))
+                        
+                        # Forecast
+                        X = np.arange(len(occ_monthly)).reshape(-1, 1)
+                        y = np.array(occ_monthly)
+                        
+                        model = LinearRegression()
+                        model.fit(X, y)
+                        
+                        forecast_X = np.arange(len(occ_monthly), len(occ_monthly) + forecast_periods).reshape(-1, 1)
+                        forecast_y = model.predict(forecast_X)
+                        
+                        # Forecast x-axis
+                        forecast_x = list(range(len(occ_monthly), len(occ_monthly) + forecast_periods))
+                        
+                        fig.add_trace(go.Scatter(
+                            x=forecast_x,
+                            y=forecast_y,
+                            mode='lines+markers',
+                            name=f'{occupation[:30]}... (Forecast)' if len(occupation) > 30 else f'{occupation} (Forecast)',
+                            line=dict(color=colors[i % len(colors)], width=2, dash='dash'),
+                            marker=dict(size=4)
+                        ))
+                
+                fig.update_layout(
+                    title="IT Job Vacancies: Forecast by Occupation",
+                    xaxis_title="Time Period",
+                    yaxis_title="Job Vacancies",
+                    hovermode='x unified',
+                    showlegend=True,
+                    plot_bgcolor='white',
+                    paper_bgcolor='white',
+                    font=dict(color='#2d3748'),
+                    margin=dict(l=50, r=50, t=80, b=50)
+                )
+                
+                st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+                
+                # Show occupation forecast summary
+                st.markdown("#### 📊 Top Occupation Forecast Summary")
+                occupation_forecasts = {}
+                
+                for occupation in top_occupations:
+                    occ_data = df[df['ANZSCO_TITLE'] == occupation]
+                    occ_monthly = []
+                    
+                    for col in date_columns:
+                        occ_monthly.append(occ_data[col].sum())
+                    
+                    if len(occ_monthly) >= 12:
+                        X = np.arange(len(occ_monthly)).reshape(-1, 1)
+                        y = np.array(occ_monthly)
+                        
+                        model = LinearRegression()
+                        model.fit(X, y)
+                        
+                        last_value = occ_monthly[-1]
+                        forecast_X = np.array([[len(occ_monthly) + forecast_periods - 1]])
+                        forecast_value = model.predict(forecast_X)[0]
+                        growth = ((forecast_value - last_value) / last_value * 100) if last_value > 0 else 0
+                        
+                        occupation_forecasts[occupation] = {
+                            'current': last_value,
+                            'forecast': forecast_value,
+                            'growth': growth
+                        }
+                
+                # Display occupation forecasts
+                if occupation_forecasts:
+                    sorted_occupations = sorted(occupation_forecasts.items(), key=lambda x: x[1]['growth'], reverse=True)
+                    
+                    for i, (occupation, data) in enumerate(sorted_occupations, 1):
+                        col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
+                        with col1:
+                            st.write(f"**{i}. {occupation[:50]}{'...' if len(occupation) > 50 else ''}**")
+                        with col2:
+                            st.write(f"Current: {data['current']:,.0f}")
+                        with col3:
+                            st.write(f"Forecast: {data['forecast']:,.0f}")
+                        with col4:
+                            st.write(f"Growth: {data['growth']:+.1f}%")
+            except Exception as e:
+                st.error(f"Error creating forecast by occupation chart: {e}")
+                         
+    except Exception as e:
+        st.error(f"Error loading visualizations: {e}")
+
+def show_combined_view():
+    """Display the Combined View (placeholder)"""
+    
+    # Add navigation buttons
+    col1, col2, col3 = st.columns([1, 2, 1])
+    
+    with col1:
+        if st.button("← Back to Home", key="back_from_combined"):
+            st.session_state.current_page = "landing"
+            st.rerun()
+    
+    with col3:
+        if st.button("🗑️ Reset All Data", key="reset_data_combined", type="secondary"):
+            reset_all_data()
+            st.session_state.current_page = "landing"
+            st.rerun()
+    
+    # Beautiful dashboard header
+    st.markdown("""
+    <div class="dashboard-header">
+        <h1>🔄 Combined View</h1>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Beautiful coming soon message
+    st.markdown("""
+    <div style="background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%); padding: 3rem; border-radius: 20px; text-align: center; box-shadow: 0 15px 35px rgba(0,0,0,0.1);">
+        <div style="font-size: 4rem; margin-bottom: 1rem;">🚧</div>
+        <h2 style="color: #2d3748; margin-bottom: 1rem; font-family: 'Inter', sans-serif;">Combined View Coming Soon!</h2>
+        <p style="color: #4a5568; font-size: 1.2rem; margin: 0; font-family: 'Inter', sans-serif;">This will show integrated analysis from both ABS and IVI datasets for comprehensive market insights.</p>
+    </div>
+    """, unsafe_allow_html=True)
 
 def show_analysis_page():
     """Show the main data analysis page"""
@@ -165,87 +1608,6 @@ def show_analysis_page():
     except Exception:
         pass
     
-    # Sidebar
-    with st.sidebar:
-        st.header("🚀 Quick Actions")
-        
-        # URL Analysis
-        st.subheader("Analyze URL")
-        url_input = st.text_input(
-            "Enter dataset URL:",
-            placeholder="https://www.abs.gov.au/statistics/labour/jobs/job-vacancies-australia/may-2025",
-            help="Enter a URL containing job market datasets"
-        )
-        
-        if st.button("🔍 Discover & Analyze", type="primary"):
-            if url_input:
-                analyze_url(url_input)
-            else:
-                st.error("Please enter a URL")
-        
-        st.divider()
-        
-        # ABS Releases
-        st.subheader("ABS Releases")
-        col_latest, col_custom = st.columns([1, 1])
-        with col_latest:
-            if st.button("⬇️ Download Latest"):
-                abs_download_and_process("latest")
-        with col_custom:
-            months = [
-                "January","February","March","April","May","June",
-                "July","August","September","October","November","December"
-            ]
-            m = st.selectbox("Month", months, index=4)
-            y = st.number_input("Year", min_value=2000, max_value=2100, value=int(datetime.now().year), step=1)
-            if st.button("⬇️ Download Month"):
-                abs_download_and_process(f"{m} {int(y)}")
-        
-        # File Upload
-        st.subheader("Upload Dataset")
-        uploaded_file = st.file_uploader(
-            "Choose a file",
-            type=['csv', 'xlsx', 'xls', 'json'],
-            help="Upload your own dataset file"
-        )
-        
-        if uploaded_file is not None:
-            if st.button("📊 Process Uploaded File"):
-                process_uploaded_file(uploaded_file)
-        
-        st.divider()
-        
-        # Dataset Selection
-        if st.session_state.datasets:
-            st.subheader("📁 Available Datasets")
-            
-            # Handle both list and dictionary formats
-            if isinstance(st.session_state.datasets, list):
-                dataset_names = st.session_state.datasets
-            else:
-                dataset_names = list(st.session_state.datasets.keys())
-            
-            if dataset_names:
-                # Safe index selection
-                try:
-                    if st.session_state.current_dataset and st.session_state.current_dataset in dataset_names:
-                        default_index = dataset_names.index(st.session_state.current_dataset)
-                    else:
-                        default_index = 0
-                except (ValueError, AttributeError):
-                    default_index = 0
-                    st.session_state.current_dataset = None
-                
-                selected_dataset = st.selectbox(
-                    "Select dataset to view:",
-                    dataset_names,
-                    index=default_index
-                )
-            
-            if selected_dataset != st.session_state.current_dataset:
-                st.session_state.current_dataset = selected_dataset
-                st.rerun()
-        
 
     
     # Main content area
@@ -330,30 +1692,69 @@ def show_visualizations_page():
                 st.subheader("Trends")
                 c1, c2, c3 = st.columns(3)
                 with c1:
-                    st.plotly_chart(viz.chart_multiline(long, chosen), width='stretch', key=f"pl-multi-{idx}")
+                    fig_multi = viz.chart_multiline(long, chosen)
+                    st.plotly_chart(fig_multi, config={'displayModeBar': False}, key=f"pl-multi-{idx}")
                 with c2:
-                    st.plotly_chart(viz.chart_indexed(long, base=base_year, industries=chosen), width='stretch', key=f"pl-indexed-{idx}")
+                    fig_indexed = viz.chart_indexed(long, base=base_year, industries=chosen)
+                    st.plotly_chart(fig_indexed, config={'displayModeBar': False}, key=f"pl-indexed-{idx}")
                 with c3:
-                    st.plotly_chart(viz.chart_rolling_mean(long, window=int(roll_win), industries=chosen), width='stretch', key=f"pl-roll-{idx}")
+                    fig_roll = viz.chart_rolling_mean(long, window=int(roll_win), industries=chosen)
+                    st.plotly_chart(fig_roll, config={'displayModeBar': False}, key=f"pl-roll-{idx}")
 
                 st.subheader("Rankings & Composition")
                 r1, r2 = st.columns(2)
                 with r1:
-                    st.plotly_chart(viz.chart_latest_bar(long), width='stretch', key=f"pl-bar-{idx}")
+                    fig_bar = viz.chart_latest_bar(long)
+                    st.plotly_chart(fig_bar, config={'displayModeBar': False}, key=f"pl-bar-{idx}")
                 with r2:
-                    st.plotly_chart(viz.chart_latest_pie(long), width='stretch', key=f"pl-pie-{idx}")
-                st.plotly_chart(viz.chart_stacked_composition(long), width='stretch', key=f"pl-stack-{idx}")
+                    fig_pie = viz.chart_latest_pie(long)
+                    st.plotly_chart(fig_pie, config={'displayModeBar': False}, key=f"pl-pie-{idx}")
+                fig_stack = viz.chart_stacked_composition(long)
+                st.plotly_chart(fig_stack, config={'displayModeBar': False}, key=f"pl-stack-{idx}")
 
                 st.subheader("Growth & Change")
                 g1, g2 = st.columns(2)
                 with g1:
-                    st.plotly_chart(viz.chart_yoy_heatmap(long), width='stretch', key=f"pl-yoy-{idx}")
+                    fig_yoy = viz.chart_yoy_heatmap(long)
+                    st.plotly_chart(fig_yoy, config={'displayModeBar': False}, key=f"pl-yoy-{idx}")
                 with g2:
-                    st.plotly_chart(viz.chart_growth_vs_size_bubble(long), width='stretch', key=f"pl-bubble-{idx}")
-                st.plotly_chart(viz.chart_delta_between(long, start="2019-01-01"), width='stretch', key=f"pl-delta-{idx}")
+                    fig_bubble = viz.chart_growth_vs_size_bubble(long)
+                    st.plotly_chart(fig_bubble, config={'displayModeBar': False}, key=f"pl-bubble-{idx}")
+                fig_delta = viz.chart_delta_between(long, start="2019-01-01")
+                st.plotly_chart(fig_delta, config={'displayModeBar': False}, key=f"pl-delta-{idx}")
+
+                st.subheader("Future Outlook (5-Year Forecast)")
+                
+                # Forecast controls
+                col_forecast_years, col_uncertainty = st.columns([1, 1])
+                with col_forecast_years:
+                    forecast_years = st.number_input("Forecast Years", min_value=1, max_value=10, value=5, step=1, key=f"forecast-years-{idx}")
+                with col_uncertainty:
+                    prediction_style = st.selectbox(
+                        "Prediction Style", 
+                        ["Optimistic", "Balanced", "Conservative"], 
+                        index=1, 
+                        help="Optimistic = Narrower range (more precise), Conservative = Wider range (more cautious)",
+                        key=f"prediction-style-{idx}"
+                    )
+                    # Convert to confidence level
+                    confidence_level = {"Optimistic": 0.90, "Balanced": 0.95, "Conservative": 0.99}[prediction_style]
+                
+                # Main forecast chart
+                fig_forecast = viz.chart_historical_and_forecast(long, industries=chosen, forecast_years=forecast_years, confidence_level=confidence_level)
+                st.plotly_chart(fig_forecast, config={'displayModeBar': False}, key=f"pl-forecast-{idx}")
+                
+                # Forecast summary (removed R² score chart for better UX)
+                # fig_forecast_summary = viz.chart_forecast_summary(long, industries=chosen, forecast_years=forecast_years)
+                # st.plotly_chart(fig_forecast_summary, config={'displayModeBar': False}, key=f"pl-forecast-summary-{idx}")
+                
+                # Forecast disclaimer
+                st.info("⚠️ **Forecast Disclaimer**: Predictions are based on historical trends and should be used for planning purposes only. Actual results may vary due to unforeseen economic conditions, policy changes, or market disruptions.")
 
                 st.subheader("COVID Impact")
-                st.plotly_chart(viz.chart_indexed(long, base=base_year, industries=chosen), width='stretch', key=f"pl-indexed-covid-{idx}")
+                fig_covid = viz.chart_indexed(long, base=base_year, industries=chosen)
+                st.plotly_chart(fig_covid, config={'displayModeBar': False}, key=f"pl-indexed-covid-{idx}")
+                # end dataset tab content
 
     st.divider()
     
@@ -367,173 +1768,38 @@ def show_visualizations_page():
 def show_welcome_screen():
     """Display welcome screen when no datasets are loaded"""
     
-    col1, col2, col3 = st.columns([1, 2, 1])
+    # Use Streamlit's native components instead of HTML
+    st.markdown("## 🔍 Job Market Analysis")
+    st.markdown("### Welcome to Job Market Analysis AI!")
     
-    with col2:
-        st.markdown("""
-        ## 🎯 Welcome to Job Market Analysis AI!
-        
-        This intelligent AI agent can automatically:
-        
-        - **🔍 Discover** datasets from URLs
-        - **📊 Preprocess** and clean data
-        - **🧠 Analyze** job market trends
-        
-        ### Getting Started:
-        
-        1. **Enter a URL** in the sidebar to analyze existing datasets
-        2. **Upload a file** to analyze your own data
-        3. **Explore insights** and visualizations
-        
-        ### Example URLs:
-        - Australian Bureau of Statistics (ABS) job vacancies
-        - Government employment data
-        - Industry reports and surveys
-        """)
-        
-        # Example analysis
-        st.markdown("### 🚀 Try it out!")
-        st.markdown("Use the sidebar to enter a URL or upload a file to get started with your analysis.")
-
-def analyze_url(url):
-    """Analyze datasets from a given URL"""
+    st.markdown("---")
     
-    with st.spinner("🔍 Discovering datasets..."):
-        try:
-            # Call the FastAPI backend
-            response = requests.post(
-                "http://localhost:8000/analyze-url",
-                json={"url": url},
-                timeout=30
-            )
-            
-            if response.status_code == 200:
-                data = response.json()
-                
-                if data.get("status") == "success":
-                    st.success(f"✅ Successfully discovered {data['datasets_discovered']} datasets!")
-                    
-                    # Store results in session state
-                    st.session_state.datasets = data.get("processed_datasets", [])
-                    st.session_state.analysis_results = data.get("sample_analysis", {})
-                    
-                    # Convert datasets to a dictionary format for easier handling
-                    if isinstance(st.session_state.datasets, list):
-                        st.session_state.datasets = {name: {"name": name} for name in st.session_state.datasets}
-                    
-                    # Check if we need to force reload a specific dataset
-                    current_dataset = st.session_state.get('current_dataset')
-                    if current_dataset and st.session_state.get(f'force_reload_{current_dataset}', False):
-                        # Clear the force reload flag
-                        st.session_state[f'force_reload_{current_dataset}'] = False
-                        # The dataset will be reloaded automatically
-                    
-                    # Show results
-                    st.json(data)
-                    st.rerun()
-                else:
-                    st.error("❌ Analysis failed")
-                    st.json(data)
-            else:
-                st.error(f"❌ Error: {response.status_code}")
-                st.text(response.text)
-                
-        except requests.exceptions.ConnectionError:
-            st.error("❌ Cannot connect to backend. Please ensure the FastAPI server is running.")
-        except Exception as e:
-            st.error(f"❌ Error: {str(e)}")
-
-def abs_download_and_process(query: str):
-    """Call backend to download an ABS release by query then process files and refresh UI."""
-    with st.spinner(f"⬇️ Downloading ABS release: {query}..."):
-        try:
-            r = requests.post("http://localhost:8000/abs/download", json={"query": query}, timeout=60)
-            if r.status_code != 200:
-                st.error(f"Download failed: {r.text}")
-                return
-            download_info = r.json()
-            paths = download_info.get("downloaded", [])
-            if not paths:
-                st.warning("No files downloaded.")
-                return
-            st.success(f"Downloaded {len(paths)} files. Processing...")
-        except Exception as e:
-            st.error(f"Download error: {e}")
-            return
-    with st.spinner("📊 Processing downloaded files..."):
-        try:
-            pr = requests.post("http://localhost:8000/process-files", json={"paths": paths}, timeout=120)
-            if pr.status_code != 200:
-                st.error(f"Processing failed: {pr.text}")
-                return
-            pdata = pr.json()
-            # Refresh datasets list from backend for safety
-            ds = requests.get("http://localhost:8000/datasets", timeout=15)
-            if ds.status_code == 200:
-                ds_json = ds.json()
-                names = ds_json.get("datasets", [])
-                # Ensure dict form
-                st.session_state.datasets = {name: {"name": name} for name in names}
-                # Set current dataset to first processed one
-                processed = pdata.get("processed", [])
-                if processed:
-                    st.session_state.current_dataset = processed[0].get("dataset_name")
-            st.success("ABS release processed. Refreshing view...")
-            st.rerun()
-        except Exception as e:
-            st.error(f"Processing error: {e}")
-
-def process_uploaded_file(uploaded_file):
-    """Process an uploaded dataset file"""
+    st.markdown("#### This intelligent AI agent can automatically:")
+    st.markdown("""
+    - 🔍 **Discover** datasets from URLs
+    - 📊 **Preprocess** and clean data  
+    - 🧠 **Analyze** job market trends
+    """)
     
-    with st.spinner("📊 Processing uploaded file..."):
-        try:
-            # Save file temporarily
-            file_path = f"temp_{uploaded_file.name}"
-            with open(file_path, "wb") as f:
-                f.write(uploaded_file.getbuffer())
-            
-            # Call the FastAPI backend
-            files = {"file": (uploaded_file.name, open(file_path, "rb"), uploaded_file.type)}
-            response = requests.post(
-                "http://localhost:8000/upload-dataset",
-                files=files,
-                timeout=30
-            )
-            
-            # Clean up temp file
-            os.remove(file_path)
-            
-            if response.status_code == 200:
-                data = response.json()
-                
-                if data.get("status") == "success":
-                    st.success(f"✅ Successfully processed {uploaded_file.name}!")
-                    
-                    # Store results in session state
-                    dataset_name = data['dataset_name']
-                    
-                    # Ensure datasets is a dictionary
-                    if not isinstance(st.session_state.datasets, dict):
-                        st.session_state.datasets = {}
-                    
-                    st.session_state.datasets[dataset_name] = data
-                    st.session_state.analysis_results[dataset_name] = data['analysis']
-                    st.session_state.current_dataset = dataset_name
-                    
-                    st.json(data)
-                    st.rerun()
-                else:
-                    st.error("❌ Processing failed")
-                    st.json(data)
-            else:
-                st.error(f"❌ Error: {response.status_code}")
-                st.text(response.text)
-                
-        except requests.exceptions.ConnectionError:
-            st.error("❌ Cannot connect to backend. Please ensure the FastAPI server is running.")
-        except Exception as e:
-            st.error(f"❌ Error: {str(e)}")
+    st.markdown("#### Getting Started:")
+    st.markdown("""
+    1. **Enter a URL** in the sidebar to analyze existing datasets
+    2. **Upload a file** to analyze your own data
+    3. **Explore insights** and visualizations
+    """)
+    
+    st.markdown("#### Example URLs:")
+    st.markdown("""
+    - Australian Bureau of Statistics (ABS) job vacancies
+    - Government employment data
+    - Industry reports and surveys
+    """)
+    
+    st.markdown("---")
+    
+    # Call to action box using st.info
+    st.info("🚀 **Try it out!** Click on the ABS Dataset Dashboard button above to automatically download and analyze the latest job market data!")
+
 
 def show_dataset_analysis():
     """Display analysis results for the selected dataset"""

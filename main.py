@@ -72,6 +72,8 @@ def restore_from_disk() -> int:
                 # Build analysis and charts if missing
                 if dataset_name not in analysis_results:
                     analysis_results[dataset_name] = analyzer_agent.analyze_job_market_data(df, dataset_name)
+                # Auto-save charts for industry datasets on restore as well
+                _auto_save_industry_charts(df, dataset_name)
                 count += 1
             except Exception as e:
                 logger.error(f"Failed to restore {csv_path}: {e}")
@@ -83,10 +85,46 @@ def restore_from_disk() -> int:
             processed_datasets[dataset_name] = df
             if dataset_name not in analysis_results:
                 analysis_results[dataset_name] = analyzer_agent.analyze_job_market_data(df, dataset_name)
+            _auto_save_industry_charts(df, dataset_name)
             count += 1
         except Exception as e:
             logger.error(f"Failed to restore {csv_path}: {e}")
     return count
+
+def _auto_save_industry_charts(df: pd.DataFrame, dataset_name: str) -> None:
+    """If the dataframe looks like an ABS industry dataset, render key charts and
+    save PNGs under charts/ for the dataset. This runs silently and never raises.
+    """
+    try:
+        cols = set(map(str, df.columns))
+        is_industry = ("Date" in cols) and any(k in cols for k in [
+            "Mining", "Manufacturing", "Construction", "Retail Trade",
+            "Accommodation and Food Services", "Administrative and Support Services",
+            "Education and Training", "Electricity, Gas, Water and Waste Services",
+            "Health Care and Social Assistance",
+        ])
+        if not is_industry:
+            return
+
+        long = visualizer.prepare_long_format(df)
+        industries = sorted(long["Industry"].unique())
+        # Build figures similar to the dashboard
+        figs = {
+            "trends_multiline": visualizer.chart_multiline(long, industries),
+            "trends_indexed": visualizer.chart_indexed(long, base="2019-01-01", industries=industries),
+            "trends_rolling": visualizer.chart_rolling_mean(long, window=4, industries=industries),
+            "rank_bar_latest": visualizer.chart_latest_bar(long),
+            "rank_pie_latest": visualizer.chart_latest_pie(long),
+            "composition_stacked": visualizer.chart_stacked_composition(long),
+            "yoy_heatmap": visualizer.chart_yoy_heatmap(long),
+            "growth_vs_size": visualizer.chart_growth_vs_size_bubble(long),
+            "delta_2019_latest": visualizer.chart_delta_between(long, start="2019-01-01"),
+            "covid_indexed": visualizer.chart_indexed(long, base="2019-01-01", industries=industries),
+        }
+        prefix = os.path.splitext(os.path.basename(dataset_name))[0]
+        visualizer.save_pngs(figs, outdir="charts", prefix=prefix)
+    except Exception as _:
+        return
 
 # Removed saved-charts endpoint per requirements
 
@@ -219,7 +257,8 @@ async def analyze_url(url_data: Dict[str, str]):
                         analysis = analyzer_agent.analyze_job_market_data(df, dataset_name)
                         if analysis:
                             analysis_results[dataset_name] = analysis
-                            # Visualization saving removed; Streamlit renders interactively from memory
+                            # Auto-save dashboard charts for industry datasets
+                            _auto_save_industry_charts(df, dataset_name)
                             
                 
             except Exception as e:
@@ -274,6 +313,29 @@ async def analyze_url(url_data: Dict[str, str]):
         duration = (datetime.now() - start_time).total_seconds()
         logger.error(f"Error analyzing URL {url} after {duration:.3f}s: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
+
+@app.post("/ivi/download")
+async def ivi_download(command: Dict[str, str]):
+    """Download IVI (Internet Vacancy Index) files from Jobs and Skills Australia.
+    Body: { "file_type": "anzsco4_states" | "anzsco2_states" | "anzsco2_regions" | "anzsco4_regions" | "skill_level" }
+    Downloads raw files only and returns file paths. No preprocessing here.
+    """
+    file_type = command.get("file_type", "anzsco4_states")
+    try:
+        # Download IVI file
+        paths = discovery_agent.download_ivi_file(file_type)
+        if not paths:
+            raise HTTPException(status_code=404, detail="No IVI files downloaded")
+        
+        return {
+            "status": "success",
+            "downloaded": paths,
+            "message": f"Downloaded {len(paths)} IVI file(s)"
+        }
+        
+    except Exception as e:
+        logger.error(f"IVI download failed: {e}")
+        raise HTTPException(status_code=500, detail=f"IVI download failed: {str(e)}")
 
 @app.post("/abs/download")
 async def abs_download(command: Dict[str, str]):
@@ -390,7 +452,8 @@ async def process_files(payload: Dict[str, List[str]]):
             processed_datasets[clean_name] = df
             analysis = analyzer_agent.analyze_job_market_data(df, clean_name)
             analysis_results[clean_name] = analysis or {}
-            # Visualization saving removed; Streamlit renders interactively
+            # Auto-save dashboard charts for industry datasets
+            _auto_save_industry_charts(df, clean_name)
             processed.append({
                 "dataset_name": clean_name,
                 "shape": list(df.shape),
