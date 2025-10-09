@@ -12,7 +12,6 @@ An intelligent AI agent that automatically discovers, downloads, preprocesses, a
 - **🤖 Agentic AI**: Multiple specialized AI agents working together
 - **📊 Universal CSV Output**: All preprocessed data saved as CSV regardless of original format
 
-
 ## 🚀 Quick Start
 
 ### Prerequisites
@@ -86,22 +85,42 @@ An intelligent AI agent that automatically discovers, downloads, preprocesses, a
 
 ## 🎯 Usage
 
-### For ABS Job Vacancies Data
+### ABS Industry Dashboard
 
-1. **Enter the ABS URL**: `https://www.abs.gov.au/statistics/labour/jobs/job-vacancies-australia/may-2025`
-2. **Agent automatically discovers** the 4 key datasets:
-   - Table 1: Job vacancies by states and territories
-   - Table 2: Private sector job vacancies by states and territories
-   - Table 3: Public sector job vacancies by states and territories
-   - Table 4: Job vacancies by industry across Australia
-3. **Downloads and preprocesses** the data automatically
-4. **Analyzes** key metrics, trends, and insights
+1. **Start the application** using the Quick Start instructions above
+2. **Click "📊 ABS Industry Dashboard"** on the landing page
+3. **Automatic processing**:
+   - Downloads latest ABS job vacancies data
+   - Filters for industry-specific data (Table 4)
+   - Preprocesses and cleans the data
+   - Generates comprehensive analysis
+4. **Explore the dashboard**:
+   - View dataset preview and information
+   - Analyze industry trends and patterns
+   - Generate interactive visualizations
+   - Access forecasting insights
 
-### For Other Datasets
+### IVI (IT Jobs) Dashboard
 
-1. **Provide any URL** containing job market data
-2. **Upload your own files** (CSV, XLSX, XLS, JSON)
-3. **Let the AI agents** handle the rest automatically
+1. **Click "💻 IVI (IT Jobs) Dashboard"** on the landing page
+2. **Automatic processing**:
+   - Downloads IVI ANZSCO4 occupation data
+   - Filters for IT-related job categories
+   - Preprocesses state-wise vacancy data
+   - Performs specialized IT job market analysis
+3. **Explore IT job insights**:
+   - View IT job categories and distributions
+   - Analyze state-wise IT job vacancies
+   - Track IT job market trends over time
+   - Generate IT-specific forecasting
+
+### Key Features
+
+- **🤖 Fully Automated**: No manual data entry required
+- **📊 Real-time Analysis**: Fresh data from official sources
+- **🎨 Interactive Visualizations**: Charts, graphs, and maps
+- **🔮 Forecasting**: Predictive analytics for future trends
+- **📈 Comprehensive Insights**: Trends, patterns, and recommendations
 
 ## 🏗️ Project Structure
 
