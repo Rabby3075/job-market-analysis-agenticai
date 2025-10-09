@@ -177,25 +177,6 @@ class DataVisualizer:
         fig.update_layout(xaxis_type="log")
         return fig
 
-    def chart_delta_between(self, long: pd.DataFrame, start: str = "2019-01-01", end: Optional[str] = None) -> go.Figure:
-        d = long.copy()
-        dates = sorted(d["Date"].unique())
-        if not dates:
-            return go.Figure()
-        start_dt = pd.to_datetime(start)
-        nearest_start = min(dates, key=lambda t: abs(pd.Timestamp(t) - start_dt))
-        end_dt = pd.to_datetime(end) if end else pd.to_datetime(dates[-1])
-        nearest_end = min(dates, key=lambda t: abs(pd.Timestamp(t) - end_dt))
-        s = d[d["Date"] == nearest_start].groupby("Industry")["Value"].sum()
-        e = d[d["Date"] == nearest_end].groupby("Industry")["Value"].sum()
-        idx = sorted(set(s.index) | set(e.index))
-        s = s.reindex(idx).fillna(0)
-        e = e.reindex(idx).fillna(0)
-        delta = (e - s).sort_values(ascending=True)
-        fig = go.Figure(go.Bar(y=delta.index.tolist(), x=delta.values.tolist(), orientation="h"))
-        fig.update_layout(title=f"Change by industry: {pd.Timestamp(nearest_start).date()} → {pd.Timestamp(nearest_end).date()}",
-                          xaxis_title="Δ Vacancies")
-        return fig
 
     # -------------------------------
     # Saving utilities

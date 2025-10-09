@@ -1232,9 +1232,9 @@ def show_ivi_visualizations_page():
                 
                 if len(monthly_totals) >= 12:
                     import numpy as np
-                    from sklearn.linear_model import LinearRegression
                     import plotly.graph_objects as go
-                    
+                    from sklearn.linear_model import LinearRegression
+
                     # Use simple numeric x-axis
                     X = np.arange(len(monthly_totals)).reshape(-1, 1)
                     y = np.array(monthly_totals)
@@ -1328,8 +1328,8 @@ def show_ivi_visualizations_page():
             # Forecast by state
             try:
                 import numpy as np
-                from sklearn.linear_model import LinearRegression
                 import plotly.graph_objects as go
+                from sklearn.linear_model import LinearRegression
                 
                 date_columns = [col for col in df.columns if col not in ['ANZSCO_CODE', 'ANZSCO_TITLE', 'state']]
                 
@@ -1454,8 +1454,8 @@ def show_ivi_visualizations_page():
             # Forecast by occupation
             try:
                 import numpy as np
-                from sklearn.linear_model import LinearRegression
                 import plotly.graph_objects as go
+                from sklearn.linear_model import LinearRegression
                 
                 date_columns = [col for col in df.columns if col not in ['ANZSCO_CODE', 'ANZSCO_TITLE', 'state']]
                 
@@ -1690,11 +1690,6 @@ def show_visualizations_page():
 
         for idx, (tab, csv_path) in enumerate(zip(tabs, industry_csvs)):
             with tab:
-                col_base, col_roll = st.columns([1, 1])
-                with col_base:
-                    base_year = st.text_input("Index Base (YYYY-01-01)", value="2019-01-01", key=f"base-{idx}")
-                with col_roll:
-                    roll_win = st.number_input("Rolling Window (q)", min_value=2, max_value=16, value=4, step=1, key=f"roll-{idx}")
 
                 try:
                     df = pd.read_csv(csv_path)
@@ -1707,17 +1702,6 @@ def show_visualizations_page():
 
                 chosen = st.multiselect("Industries", industries, default=industries[:6], key=f"inds-{idx}")
 
-                st.subheader("Trends")
-                c1, c2, c3 = st.columns(3)
-                with c1:
-                    fig_multi = viz.chart_multiline(long, chosen)
-                    st.plotly_chart(fig_multi, config={'displayModeBar': False}, key=f"pl-multi-{idx}")
-                with c2:
-                    fig_indexed = viz.chart_indexed(long, base=base_year, industries=chosen)
-                    st.plotly_chart(fig_indexed, config={'displayModeBar': False}, key=f"pl-indexed-{idx}")
-                with c3:
-                    fig_roll = viz.chart_rolling_mean(long, window=int(roll_win), industries=chosen)
-                    st.plotly_chart(fig_roll, config={'displayModeBar': False}, key=f"pl-roll-{idx}")
 
                 st.subheader("Rankings & Composition")
                 r1, r2 = st.columns(2)
@@ -1738,8 +1722,6 @@ def show_visualizations_page():
                 with g2:
                     fig_bubble = viz.chart_growth_vs_size_bubble(long)
                     st.plotly_chart(fig_bubble, config={'displayModeBar': False}, key=f"pl-bubble-{idx}")
-                fig_delta = viz.chart_delta_between(long, start="2019-01-01")
-                st.plotly_chart(fig_delta, config={'displayModeBar': False}, key=f"pl-delta-{idx}")
 
                 st.subheader("Future Outlook (5-Year Forecast)")
                 
@@ -1770,7 +1752,7 @@ def show_visualizations_page():
                 st.info("⚠️ **Forecast Disclaimer**: Predictions are based on historical trends and should be used for planning purposes only. Actual results may vary due to unforeseen economic conditions, policy changes, or market disruptions.")
 
                 st.subheader("COVID Impact")
-                fig_covid = viz.chart_indexed(long, base=base_year, industries=chosen)
+                fig_covid = viz.chart_indexed(long, base="2019-01-01", industries=chosen)
                 st.plotly_chart(fig_covid, config={'displayModeBar': False}, key=f"pl-indexed-covid-{idx}")
                 # end dataset tab content
 
