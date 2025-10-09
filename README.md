@@ -228,42 +228,6 @@ MAX_FILE_SIZE=100MB
 
 Modify `agents/analyzer.py` to add custom analysis logic for your specific use cases.
 
-## 🚀 Deployment
-
-### Local Development
-
-For local development, follow the **Quick Start** instructions above. The application runs in development mode with:
-
-- **Hot reload** enabled for both backend and frontend
-- **Debug mode** activated
-- **Detailed logging** for troubleshooting
-
-### Production Deployment
-
-1. **Set up production environment**:
-
-   ```bash
-   # Create production virtual environment
-   python -m venv venv_prod
-   source venv_prod/bin/activate  # Linux/Mac
-   # or venv_prod\Scripts\activate  # Windows
-
-   # Install production dependencies
-   pip install -r requirements.txt
-   ```
-
-2. **Deploy with Gunicorn**:
-
-   ```bash
-   gunicorn main:app -w 4 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
-   ```
-
-3. **Deploy with Docker**:
-   ```bash
-   docker build -t job-market-ai .
-   docker run -p 8000:8000 job-market-ai
-   ```
-
 ## 📈 Example Analysis Output
 
 The system automatically generates:
