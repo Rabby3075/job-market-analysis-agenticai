@@ -453,14 +453,6 @@ def show_landing_page():
         border-color: #667eea;
     }
     
-    .dashboard-card.coming-soon {
-        opacity: 0.7;
-        background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-    }
-    
-    .dashboard-card.coming-soon::before {
-        background: linear-gradient(90deg, #6c757d, #adb5bd);
-    }
     
     .card-icon {
         font-size: 3rem;
@@ -484,24 +476,6 @@ def show_landing_page():
         margin-bottom: 1rem;
     }
     
-    .card-status {
-        font-family: 'Inter', sans-serif;
-        font-size: 0.85rem;
-        font-weight: 500;
-        padding: 0.3rem 0.8rem;
-        border-radius: 15px;
-        display: inline-block;
-    }
-    
-    .dashboard-card .card-status {
-        background: linear-gradient(135deg, #10b981, #059669);
-        color: white;
-    }
-    
-    .dashboard-card.coming-soon .card-status {
-        background: linear-gradient(135deg, #6b7280, #4b5563);
-        color: white;
-    }
     
     /* Dashboard button styling */
     .stButton button {
@@ -656,7 +630,6 @@ def show_landing_page():
             <div class="card-icon">📊</div>
             <div class="card-title">ABS Industry Dashboard</div>
             <div class="card-desc">Analyze Australian job market data by industry from ABS sources</div>
-            <div class="card-status">Available</div>
         </div>
         """, unsafe_allow_html=True)
         if st.button("📊 ABS Industry Dashboard", key="abs_dashboard", use_container_width=True):
@@ -670,11 +643,10 @@ def show_landing_page():
     
     with col2:
         st.markdown("""
-        <div class="dashboard-card coming-soon">
+        <div class="dashboard-card">
             <div class="card-icon">💻</div>
             <div class="card-title">IVI (IT Jobs) Dashboard</div>
             <div class="card-desc">IT job market analysis from IVI datasets</div>
-            <div class="card-status">Coming Soon</div>
         </div>
         """, unsafe_allow_html=True)
         if st.button("💻 IVI (IT Jobs) Dashboard", key="ivi_dashboard", use_container_width=True):
