@@ -11,7 +11,7 @@ An intelligent AI agent that automatically discovers, downloads, preprocesses, a
 - **🌐 Modern Web Interface**: Built with FastAPI and Streamlit
 - **🤖 Agentic AI**: Multiple specialized AI agents working together
 - **📊 Universal CSV Output**: All preprocessed data saved as CSV regardless of original format
-- **📝 Professional Logging**: Comprehensive logging system with file output and rotation
+
 
 ## 🚀 Quick Start
 
