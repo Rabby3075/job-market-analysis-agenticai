@@ -299,8 +299,6 @@ def main():
         show_abs_dashboard()
     elif st.session_state.current_page == 'ivi_dashboard':
         show_ivi_dashboard()
-    elif st.session_state.current_page == 'combined_view':
-        show_combined_view()
 
 def show_landing_page():
     """Display the landing page with title, intro, and navigation buttons"""
@@ -650,7 +648,7 @@ def show_landing_page():
     """, unsafe_allow_html=True)
     
     # Modern dashboard cards with proper buttons
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
     
     with col1:
         st.markdown("""
@@ -687,18 +685,6 @@ def show_landing_page():
             else:
                 st.error("❌ Failed to download and process IVI data. Please check backend connection.")
     
-    with col3:
-        st.markdown("""
-        <div class="dashboard-card coming-soon">
-            <div class="card-icon">🔄</div>
-            <div class="card-title">Combined View</div>
-            <div class="card-desc">Integrated analysis from both ABS and IVI</div>
-            <div class="card-status">Coming Soon</div>
-        </div>
-        """, unsafe_allow_html=True)
-        if st.button("🔄 Combined View", key="combined_view", use_container_width=True):
-            st.session_state.current_page = "combined_view"
-            st.rerun()
 
 def show_abs_dashboard():
     """Display the ABS Dataset Dashboard (existing functionality)"""
@@ -1570,38 +1556,6 @@ def show_ivi_visualizations_page():
     except Exception as e:
         st.error(f"Error loading visualizations: {e}")
 
-def show_combined_view():
-    """Display the Combined View (placeholder)"""
-    
-    # Add navigation buttons
-    col1, col2, col3 = st.columns([1, 2, 1])
-    
-    with col1:
-        if st.button("← Back to Home", key="back_from_combined"):
-            st.session_state.current_page = "landing"
-            st.rerun()
-    
-    with col3:
-        if st.button("🗑️ Reset All Data", key="reset_data_combined", type="secondary"):
-            reset_all_data()
-            st.session_state.current_page = "landing"
-            st.rerun()
-    
-    # Beautiful dashboard header
-    st.markdown("""
-    <div class="dashboard-header">
-        <h1>🔄 Combined View</h1>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Beautiful coming soon message
-    st.markdown("""
-    <div style="background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%); padding: 3rem; border-radius: 20px; text-align: center; box-shadow: 0 15px 35px rgba(0,0,0,0.1);">
-        <div style="font-size: 4rem; margin-bottom: 1rem;">🚧</div>
-        <h2 style="color: #2d3748; margin-bottom: 1rem; font-family: 'Inter', sans-serif;">Combined View Coming Soon!</h2>
-        <p style="color: #4a5568; font-size: 1.2rem; margin: 0; font-family: 'Inter', sans-serif;">This will show integrated analysis from both ABS and IVI datasets for comprehensive market insights.</p>
-    </div>
-    """, unsafe_allow_html=True)
 
 def show_analysis_page():
     """Show the main data analysis page"""
