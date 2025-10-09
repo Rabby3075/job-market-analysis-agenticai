@@ -93,14 +93,14 @@ def check_backend_status():
         return False
 
 def auto_download_abs_latest():
-    """Automatically download and process latest ABS data"""
+    """Automatically download and process latest ABS data - INDUSTRY ONLY"""
     try:
         # Check backend status first
         if not check_backend_status():
             st.error("❌ **Backend server is not running!**\n\nPlease start the backend server first:\n1. Open a new terminal\n2. Run: `python main.py`\n3. Wait for 'Application startup complete'\n4. Then try again")
             return False
         
-        with st.spinner("📥 Downloading latest ABS dataset..."):
+        with st.spinner("📥 Downloading latest ABS dataset (Industry only)..."):
             r = requests.post("http://localhost:8000/abs/download", json={"query": "latest"}, timeout=300)
             if r.status_code != 200:
                 st.error(f"Download failed: {r.text}")
@@ -112,8 +112,26 @@ def auto_download_abs_latest():
                 st.warning("No files downloaded.")
                 return False
             
-        with st.spinner("📊 Processing downloaded files..."):
-            pr = requests.post("http://localhost:8000/process-files", json={"paths": paths}, timeout=600)
+            # Filter for industry files only (Table 4)
+            industry_paths = []
+            for path in paths:
+                try:
+                    # Check the Index sheet to identify Table 4 (Industry) files
+                    import pandas as pd
+                    df_index = pd.read_excel(path, sheet_name='Index', header=None)
+                    index_text = " ".join(df_index.fillna("").astype(str).values.ravel()).lower()
+                    if "table 4" in index_text and "industry" in index_text:
+                        industry_paths.append(path)
+                except Exception as e:
+                    # If we can't read the file, skip it
+                    continue
+            
+            if not industry_paths:
+                st.warning("No industry data found in downloaded files.")
+                return False
+            
+        with st.spinner("📊 Processing industry data..."):
+            pr = requests.post("http://localhost:8000/process-files", json={"paths": industry_paths}, timeout=600)
             if pr.status_code != 200:
                 st.error(f"Processing failed: {pr.text}")
                 return False
@@ -638,19 +656,19 @@ def show_landing_page():
         st.markdown("""
         <div class="dashboard-card">
             <div class="card-icon">📊</div>
-            <div class="card-title">ABS Dataset Dashboard</div>
-            <div class="card-desc">Analyze Australian job market data from ABS sources</div>
+            <div class="card-title">ABS Industry Dashboard</div>
+            <div class="card-desc">Analyze Australian job market data by industry from ABS sources</div>
             <div class="card-status">Available</div>
         </div>
         """, unsafe_allow_html=True)
-        if st.button("📊 ABS Dataset Dashboard", key="abs_dashboard", use_container_width=True):
-            # Automatically download and process latest ABS data
+        if st.button("📊 ABS Industry Dashboard", key="abs_dashboard", use_container_width=True):
+            # Automatically download and process latest ABS industry data
             if auto_download_abs_latest():
                 st.session_state.current_page = "abs_dashboard"
-                st.success("✅ Latest ABS data downloaded and processed successfully!")
+                st.success("✅ Latest ABS industry data downloaded and processed successfully!")
                 st.rerun()
             else:
-                st.error("❌ Failed to download ABS data. Please check backend connection.")
+                st.error("❌ Failed to download ABS industry data. Please check backend connection.")
     
     with col2:
         st.markdown("""
@@ -702,7 +720,7 @@ def show_abs_dashboard():
     # Beautiful dashboard header
     st.markdown("""
     <div class="dashboard-header">
-        <h1>📊 ABS Dataset Dashboard</h1>
+        <h1>📊 ABS Industry Dashboard</h1>
     </div>
     """, unsafe_allow_html=True)
     
