@@ -15,35 +15,71 @@ An intelligent AI agent that automatically discovers, downloads, preprocesses, a
 
 ## 🚀 Quick Start
 
-### Option 1: One-Click Startup (Recommended)
+### Prerequisites
 
-```bash
-# Start the backend
-python main.py
+- **Python 3.8+** installed on your system
+- **Git** for cloning the repository
 
-# In a new terminal, start the frontend
-streamlit run streamlit_app.py
-```
+### Option 1: One-Click Startup (Windows - Recommended)
 
-### Option 2: Manual Startup
+1. **Clone the repository**:
 
-1. **Install Dependencies**:
+   ```bash
+   git clone <repository-url>
+   cd job-vacancies-agent
+   ```
+
+2. **Double-click `start_app.bat`**:
+
+   - This script will automatically:
+     - Create a virtual environment
+     - Install all dependencies
+     - Create necessary directories
+     - Start both backend and frontend servers
+   - Two command windows will open (backend and frontend)
+
+3. **Access the Application**:
+   - 🌐 **FastAPI Backend**: http://localhost:8000
+   - 📚 **API Docs**: http://localhost:8000/docs
+   - 🎨 **Streamlit Frontend**: http://localhost:8501
+
+### Option 2: Manual Setup
+
+1. **Create Virtual Environment**:
+
+   ```bash
+   python -m venv venv
+
+   # Windows
+   venv\Scripts\activate
+
+   # macOS/Linux
+   source venv/bin/activate
+   ```
+
+2. **Install Dependencies**:
 
    ```bash
    pip install -r requirements.txt
    ```
 
-2. **Run the Application**:
+3. **Create Data Directories**:
 
    ```bash
-   # Terminal 1: FastAPI Backend
-   uvicorn main:app --reload
+   mkdir data data\raw data\preprocessed logs charts
+   ```
 
-   # Terminal 2: Streamlit Frontend
+4. **Start the Application**:
+
+   ```bash
+   # Terminal 1: Start FastAPI Backend
+   python main.py
+
+   # Terminal 2: Start Streamlit Frontend
    streamlit run streamlit_app.py
    ```
 
-3. **Access the Application**:
+5. **Access the Application**:
    - 🌐 **FastAPI Backend**: http://localhost:8000
    - 📚 **API Docs**: http://localhost:8000/docs
    - 🎨 **Streamlit Frontend**: http://localhost:8501
@@ -177,27 +213,37 @@ Modify `agents/analyzer.py` to add custom analysis logic for your specific use c
 
 ### Local Development
 
-```bash
-# Start backend
-python main.py
+For local development, follow the **Quick Start** instructions above. The application runs in development mode with:
 
-# Start frontend (in new terminal)
-streamlit run streamlit_app.py
-```
+- **Hot reload** enabled for both backend and frontend
+- **Debug mode** activated
+- **Detailed logging** for troubleshooting
 
 ### Production Deployment
 
-```bash
-# Install production dependencies
-pip install -r requirements.txt
+1. **Set up production environment**:
 
-# Start with production server
-gunicorn main:app -w 4 -k uvicorn.workers.UvicornWorker
+   ```bash
+   # Create production virtual environment
+   python -m venv venv_prod
+   source venv_prod/bin/activate  # Linux/Mac
+   # or venv_prod\Scripts\activate  # Windows
 
-# Or use Docker
-docker build -t job-market-ai .
-docker run -p 8000:8000 job-market-ai
-```
+   # Install production dependencies
+   pip install -r requirements.txt
+   ```
+
+2. **Deploy with Gunicorn**:
+
+   ```bash
+   gunicorn main:app -w 4 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
+   ```
+
+3. **Deploy with Docker**:
+   ```bash
+   docker build -t job-market-ai .
+   docker run -p 8000:8000 job-market-ai
+   ```
 
 ## 📈 Example Analysis Output
 
