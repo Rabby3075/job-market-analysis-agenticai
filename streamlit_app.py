@@ -1879,7 +1879,7 @@ def show_dataset_analysis():
                                 df_sample = pd.DataFrame(sheet_data['sample_data'])
                                 st.write(f"**Shape:** {sheet_data.get('shape', 'Unknown')}")
                                 st.write(f"**Columns:** {len(sheet_data.get('columns', []))}")
-                                st.dataframe(df_sample, width='stretch')
+                                st.dataframe(df_sample)
                             else:
                                 st.info(f"No sample data available for sheet '{sheet_name}'")
                 else:
@@ -1935,7 +1935,7 @@ def show_geography_analysis(analysis):
                 
                 # Display as table
                 df_locations = pd.DataFrame(list(top_locations.items()), columns=['Location', 'Count'])
-                st.dataframe(df_locations, width='stretch')
+                st.dataframe(df_locations)
     else:
         st.info("No geographic data available")
 
@@ -1955,7 +1955,7 @@ def show_industry_analysis(analysis):
                 
                 # Display as table
                 df_industries = pd.DataFrame({'Industry': names, 'Count': values})
-                st.dataframe(df_industries, width='stretch')
+                st.dataframe(df_industries)
     else:
         st.info("No industry data available")
 
@@ -1974,7 +1974,7 @@ def show_sector_analysis(analysis):
                 
                 # Display as table
                 df_sectors = pd.DataFrame(list(sectors.items()), columns=['Sector', 'Count'])
-                st.dataframe(df_sectors, width='stretch')
+                st.dataframe(df_sectors)
     else:
         st.info("No sector data available")
 
@@ -1990,13 +1990,13 @@ def show_single_sheet_preview(dataset_name):
             data_info = response.json()
             if 'sample_data' in data_info and data_info['sample_data']:
                 df_sample = pd.DataFrame(data_info['sample_data'])
-                st.dataframe(df_sample, width='stretch')
+                st.dataframe(df_sample)
             else:
                 st.info("Sample data not available")
         else:
             st.info("Sample data not available")
-    except:
-        st.info("Sample data not available")
+    except Exception as e:
+        st.error(f"Error loading preview: {str(e)}")
 
 
 if __name__ == "__main__":
