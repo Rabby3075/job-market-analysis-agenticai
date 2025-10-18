@@ -22,7 +22,7 @@ An intelligent AI agent that automatically discovers, downloads, preprocesses, a
 1. **Clone the repository**:
 
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/Rabby3075/job-market-analysis-agenticai.git
    cd job-vacancies-agent
    ```
 
