@@ -7,7 +7,7 @@ import json
 import logging
 import os
 from datetime import datetime
-from typing import Dict, List
+from typing import Any, Dict, List
 
 import pandas as pd
 import uvicorn
@@ -74,6 +74,8 @@ def restore_from_disk() -> int:
                     analysis_results[dataset_name] = analyzer_agent.analyze_job_market_data(df, dataset_name)
                 # Auto-save charts for industry datasets on restore as well
                 _auto_save_industry_charts(df, dataset_name)
+                
+                
                 count += 1
             except Exception as e:
                 logger.error(f"Failed to restore {csv_path}: {e}")
@@ -86,6 +88,8 @@ def restore_from_disk() -> int:
             if dataset_name not in analysis_results:
                 analysis_results[dataset_name] = analyzer_agent.analyze_job_market_data(df, dataset_name)
             _auto_save_industry_charts(df, dataset_name)
+            
+            
             count += 1
         except Exception as e:
             logger.error(f"Failed to restore {csv_path}: {e}")
@@ -454,6 +458,7 @@ async def process_files(payload: Dict[str, List[str]]):
             analysis_results[clean_name] = analysis or {}
             # Auto-save dashboard charts for industry datasets
             _auto_save_industry_charts(df, clean_name)
+            
             processed.append({
                 "dataset_name": clean_name,
                 "shape": list(df.shape),
@@ -679,6 +684,8 @@ async def export_dataset(dataset_name: str, format: str = "csv"):
         return {"json_data": json_data}
     else:
         raise HTTPException(status_code=400, detail="Unsupported format. Use 'csv' or 'json'")
+
+
 
 if __name__ == "__main__":
     # Create data directories if they don't exist

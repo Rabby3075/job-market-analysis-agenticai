@@ -597,8 +597,8 @@ def show_landing_page():
     # Title / Banner with subtitle
     st.markdown("""
     <div class="landing-header">
-        <h1>🇦🇺 AU Job Market Analysis using Agentic AI</h1>
-        <div class="subtitle">Powered by Advanced AI Agents • Real-time Data Analysis • Predictive Insights</div>
+        <h1>AU Job Market Analysis using Agentic AI</h1>
+        <div class="subtitle">Powered by Advanced AI Agents | Real-time Data Analysis | Predictive Insights</div>
     </div>
     """, unsafe_allow_html=True)
     
@@ -626,7 +626,7 @@ def show_landing_page():
         <div class="feature-card">
             <div class="feature-icon">🔮</div>
             <div class="feature-title">Predictive Forecasting</div>
-            <div class="feature-desc">5-year predictions with confidence intervals for strategic planning</div>
+            <div class="feature-desc">Upcoming few-years predictions with confidence intervals for strategic planning</div>
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -818,6 +818,7 @@ def show_abs_dashboard():
         
         st.markdown('</div>', unsafe_allow_html=True)
     
+    
     # Route to appropriate ABS page
     if st.session_state.abs_current_page == 'analysis':
         show_analysis_page()
@@ -899,6 +900,7 @@ def show_ivi_dashboard():
     # Ensure IVI dataset name is set
     if 'current_dataset' not in st.session_state or st.session_state.current_dataset is None or 'ivi' not in str(st.session_state.current_dataset).lower():
         st.session_state.current_dataset = 'IVI IT Jobs Dataset'
+    
     
     # Show appropriate page
     if st.session_state.ivi_current_page == 'analysis':

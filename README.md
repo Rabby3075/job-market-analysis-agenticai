@@ -19,8 +19,6 @@ An intelligent AI agent that automatically discovers, downloads, preprocesses, a
 - **Python 3.8+** installed on your system
 - **Git** for cloning the repository
 
-### Option 1: One-Click Startup (Windows - Recommended)
-
 1. **Clone the repository**:
 
    ```bash
@@ -28,31 +26,10 @@ An intelligent AI agent that automatically discovers, downloads, preprocesses, a
    cd job-vacancies-agent
    ```
 
-2. **Install dependencies**:
+2. **Create Virtual Environment**:
 
    ```bash
-   pip install -r requirements.txt
-   ```
 
-3. **Double-click `start_app.bat`**:
-
-   - This script will automatically:
-     - Create a virtual environment
-     - Check if dependencies are installed
-     - Create necessary directories
-     - Start both backend and frontend servers
-   - Two command windows will open (backend and frontend)
-
-4. **Access the Application**:
-   - 🌐 **FastAPI Backend**: http://localhost:8000
-   - 📚 **API Docs**: http://localhost:8000/docs
-   - 🎨 **Streamlit Frontend**: http://localhost:8501
-
-### Option 2: Manual Setup
-
-1. **Create Virtual Environment**:
-
-   ```bash
    python -m venv venv
 
    # Windows
@@ -62,17 +39,12 @@ An intelligent AI agent that automatically discovers, downloads, preprocesses, a
    source venv/bin/activate
    ```
 
-2. **Install Dependencies**:
+3. **Install Dependencies**:
 
    ```bash
    pip install -r requirements.txt
    ```
 
-3. **Create Data Directories**:
-
-   ```bash
-   mkdir data data\raw data\preprocessed logs charts
-   ```
 
 4. **Start the Application**:
 
@@ -139,12 +111,12 @@ job-vacancies-agent/
 │   ├── data_processor.py    # Data preprocessing pipeline
 │   └── analyzer.py          # Analysis and insights engine
 ├── 🛠️ utils/
-│   └── logger.py            # Professional logging system
+│   └── logger.py            # logging system
 ├── 📁 data/                 # Downloaded datasets
 │   ├── raw/                 # Original datasets
 │   └── preprocessed/        # Clean, processed data (CSV)
 
-└── 📝 logs/                 # Professional log files
+└── 📝 logs/                 #  log files
 ```
 
 ## 🤖 AI Agents Architecture
